@@ -59,15 +59,42 @@ getHeader = Header
 
 data TextSegment = TextSegment
     { delimiter :: AC.Char
-    , keyvals   :: Map.Map [AC.Char] T.Text
+    , keyvals   :: Map.Map T.Text T.Text
     }
+
+getSegmentDelimiter :: T.Text -> Maybe Char
+getSegmentDelimiter text = case (mfirst, mlast) of
+                            (Just first, Just last) -> if fst first == snd last then Just $ fst first else Nothing
+                            (_,_) -> Nothing
+                           where mfirst = T.uncons text
+                                 mlast = T.unsnoc text
+
+_splitSegmentByEscapedDelims :: Char -> T.Text -> T.Text -> [T.Text]
+_splitSegmentByEscapedDelims delim token text = pretoken : _splitSegmentByEscapedDelims delim T.empty next
+                    where tdelim = T.singleton delim
+                          (pretoken, next) = T.breakOn tdelim text
+
+splitSegmentByEscapedDelims :: Char -> T.Text -> [[T.Text]]
+splitSegmentByEscapedDelims delim text = map (T.splitOn tdelim) splits
+                    where tdelim = T.singleton delim
+                          splits = T.splitOn (T.snoc tdelim delim) text
+
+zipEveryOther :: [T.Text] -> [(T.Text, T.Text)]
+zipEveryOther (x:y:rest) = (x,y) : zipEveryOther rest
+zipEveryOther [x] = error "Cannot every-other zip a odd-numbered list"
+zipEveryOther [] = []
+
+--getSegmentKeyvals :: Char -> T.Text -> Maybe [(T.Text, T.Text)]
+--getSegmentKeyvals delim text = if (len < 3) || odd len then Nothing else Just $ zipEveryOther $ normalizeSegmentDelims delim $ tail $ init splits
+--                               where splits = T.splitOn (T.singleton delim) text
+--                                     len = length splits
 
 getTextSegment :: Int -> Get TextSegment
 getTextSegment length = do
     segment <- Data.Text.Encoding.decodeUtf8 <$> getByteString length
-    firstChar <- fst $ T.uncons segment
-    delimiter <- if fst T.uncons segment == second T.unsnoc segment then first T.uncons segment else fail "Text segment does not start and end with the same delimiter!"
-    fail "Unable to process text segment"
+    delimiter <- maybeGet "Text segment did not start and end with the same delimiter!" $ getSegmentDelimiter segment
+    -- Remember to validate that the keyword keys are plain ASCII
+    return $! TextSegment AC.Comma Map.empty
 -- Replace with just a lot of pattern matching on text.
 -- Have a pattern that matches the exterior delimiters, delegating to a pattern that matches a properly delimited string like delim:notdelim:rest:notdelim:delim
 
@@ -83,3 +110,8 @@ getAsciiString n = getByteString n >>= parseASCII
 
 lookaheadReadFromOffset :: Int -> Get a -> Get a
 lookaheadReadFromOffset n decoder = skip n *> lookAhead decoder
+
+maybeGet :: String -> Maybe a -> Get a
+maybeGet errMsg m = case m of
+    Just a -> return a
+    Nothing -> fail errMsg
