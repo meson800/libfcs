@@ -70,24 +70,31 @@ getSegmentDelimiter text = case (mfirst, mlast) of
                                  mlast = T.unsnoc text
 
 _splitSegmentByEscapedDelims :: Char -> T.Text -> T.Text -> [T.Text]
-_splitSegmentByEscapedDelims delim token text = pretoken : _splitSegmentByEscapedDelims delim T.empty next
+_splitSegmentByEscapedDelims delim pretoken text
+    | secondChar == tdelim = _splitSegmentByEscapedDelims delim (T.append pretoken $ T.append token tdelim) $ T.drop 2 next
+    --                     ^ We found an escaped separator. Add token to the accumulated pretoken
+    | secondChar == T.empty = [T.append pretoken token]
+    --                      ^ end of string reached. Return the accumulated token
+    | secondChar /= tdelim = T.append pretoken token : _splitSegmentByEscapedDelims delim T.empty (T.drop 1 next)
+    --                     ^ This is an actual separator, not an escaped separator. Return the accumulated token
+    | otherwise = []
+    --          ^ should be unreachable
                     where tdelim = T.singleton delim
-                          (pretoken, next) = T.breakOn tdelim text
+                          (token, next) = T.breakOn tdelim text
+                          secondChar = T.drop 1 $ T.take 2 next
 
-splitSegmentByEscapedDelims :: Char -> T.Text -> [[T.Text]]
-splitSegmentByEscapedDelims delim text = map (T.splitOn tdelim) splits
-                    where tdelim = T.singleton delim
-                          splits = T.splitOn (T.snoc tdelim delim) text
+splitSegmentByEscapedDelims :: Char -> T.Text -> [T.Text]
+splitSegmentByEscapedDelims delim = _splitSegmentByEscapedDelims delim T.empty
 
 zipEveryOther :: [T.Text] -> [(T.Text, T.Text)]
 zipEveryOther (x:y:rest) = (x,y) : zipEveryOther rest
 zipEveryOther [x] = error "Cannot every-other zip a odd-numbered list"
 zipEveryOther [] = []
 
---getSegmentKeyvals :: Char -> T.Text -> Maybe [(T.Text, T.Text)]
---getSegmentKeyvals delim text = if (len < 3) || odd len then Nothing else Just $ zipEveryOther $ normalizeSegmentDelims delim $ tail $ init splits
---                               where splits = T.splitOn (T.singleton delim) text
---                                     len = length splits
+getSegmentKeyvals :: Char -> T.Text -> Maybe [(T.Text, T.Text)]
+getSegmentKeyvals delim text = if odd len then Nothing else Just $ zipEveryOther splits
+                               where splits = splitSegmentByEscapedDelims delim $ T.tail $ T.init text
+                                     len = length splits
 
 getTextSegment :: Int -> Get TextSegment
 getTextSegment length = do
