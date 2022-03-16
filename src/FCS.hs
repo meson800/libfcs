@@ -1,11 +1,11 @@
 {-# LANGUAGE LambdaCase #-}
 module FCS
-    ( someFunc
+    ( readFCS
     ) where
 
 import qualified Data.ByteString.Lazy as BL
 import Data.Int ( Int32, Int64 )
-import Data.Binary.Get (Get, getByteString, skip, lookAhead, Decoder(Fail))
+import Data.Binary.Get (Get, getByteString, skip, lookAhead, Decoder(Fail), runGet)
 import qualified ASCII
 import qualified ASCII.Char as AC
 import Text.Read (readMaybe)
@@ -14,6 +14,9 @@ import Control.Monad (liftM)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import qualified Data.Text.Encoding
+import Data.Char (isAscii)
+import Debug.Trace ( trace )
+import GHC.IO.Exception (IOException(ioe_filename))
 
 data Version = Version
     { major :: !Int32
@@ -60,14 +63,13 @@ getHeader = Header
 data TextSegment = TextSegment
     { delimiter :: AC.Char
     , keyvals   :: Map.Map T.Text T.Text
-    }
+    } deriving (Show)
 
 getSegmentDelimiter :: T.Text -> Maybe Char
-getSegmentDelimiter text = case (mfirst, mlast) of
-                            (Just first, Just last) -> if fst first == snd last then Just $ fst first else Nothing
-                            (_,_) -> Nothing
+getSegmentDelimiter text = case mfirst of
+                            Just first -> Just $ fst first
+                            Nothing -> Nothing
                            where mfirst = T.uncons text
-                                 mlast = T.unsnoc text
 
 _splitSegmentByEscapedDelims :: Char -> T.Text -> T.Text -> [T.Text]
 _splitSegmentByEscapedDelims delim pretoken text
@@ -84,7 +86,10 @@ _splitSegmentByEscapedDelims delim pretoken text
                           secondChar = T.drop 1 $ T.take 2 next
 
 splitSegmentByEscapedDelims :: Char -> T.Text -> [T.Text]
-splitSegmentByEscapedDelims delim = _splitSegmentByEscapedDelims delim T.empty
+splitSegmentByEscapedDelims delim text = _splitSegmentByEscapedDelims delim T.empty trimmed
+                        where tdelim = T.singleton delim
+                              delimited = fst (T.breakOnEnd tdelim $ snd (T.breakOn tdelim text))
+                              trimmed = T.tail $ T.init delimited
 
 zipEveryOther :: [T.Text] -> [(T.Text, T.Text)]
 zipEveryOther (x:y:rest) = (x,y) : zipEveryOther rest
@@ -93,22 +98,37 @@ zipEveryOther [] = []
 
 getSegmentKeyvals :: Char -> T.Text -> Maybe [(T.Text, T.Text)]
 getSegmentKeyvals delim text = if odd len then Nothing else Just $ zipEveryOther splits
-                               where splits = splitSegmentByEscapedDelims delim $ T.tail $ T.init text
+                               where splits = splitSegmentByEscapedDelims delim text
                                      len = length splits
 
 getTextSegment :: Int -> Get TextSegment
 getTextSegment length = do
     segment <- Data.Text.Encoding.decodeUtf8 <$> getByteString length
-    delimiter <- maybeGet "Text segment did not start and end with the same delimiter!" $ getSegmentDelimiter segment
-    -- Remember to validate that the keyword keys are plain ASCII
-    return $! TextSegment AC.Comma Map.empty
--- Replace with just a lot of pattern matching on text.
--- Have a pattern that matches the exterior delimiters, delegating to a pattern that matches a properly delimited string like delim:notdelim:rest:notdelim:delim
+    delimiter <- maybeGet "Text segment delimiter is invalid!" $ getSegmentDelimiter segment
+    acDelimiter <- maybeGet "Delimiter is not an ASCII character" $ AC.fromIntMaybe . fromEnum $ delimiter
+    keyvals <- maybeGet "Text segment has invalid key-value specification" $ getSegmentKeyvals delimiter segment
+    if all (T.all isAscii . fst) keyvals then return () else fail "Specified keys are not ASCII"
+    return $! TextSegment acDelimiter $ Map.fromList keyvals
 
+data FCS = FCS
+    { header :: Header
+    , primaryText :: TextSegment
+    } deriving (Show)
 
-someFunc :: IO ()
-someFunc = putStrLn "someFunc"
+getFCS :: Get FCS
+getFCS = do
+    header <- lookAhead getHeader
+    skip $ fromIntegral . start . textOffsets $ header
+    textSegment <- getTextSegment $ fromIntegral $ 1 + (end . textOffsets $ header) - (start . textOffsets $ header)
+    return $! FCS header textSegment
 
+readFCS :: FilePath -> IO ()
+readFCS filename = do
+    input <- BL.readFile filename
+    print $ runGet getFCS input
+
+-- Useful trick: (trace . show $ header) return() in do-statement
+-- Helper functions
 getAsciiString :: Int -> Get [ASCII.Char]
 getAsciiString n = getByteString n >>= parseASCII
     where parseASCII bs = case ASCII.byteStringToCharListMaybe bs of
