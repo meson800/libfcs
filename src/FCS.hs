@@ -48,6 +48,7 @@ getSegmentOffsets = do
 data Header = Header
     { version :: Version
     , textOffsets :: SegmentOffsets
+    , stextOffsets :: SegmentOffsets
     , dataOffsets :: SegmentOffsets
     , analysisOffsets :: SegmentOffsets
     } deriving (Show)
@@ -57,6 +58,7 @@ getHeader = Header
     <$> getVersion
     <* (getAsciiString 4 >>= (\cs -> if all (== AC.Space) cs then return True else fail "Invalid character in header spacer"))
     <*> getSegmentOffsets
+    <*> return (SegmentOffsets 0 0)
     <*> getSegmentOffsets
     <*> getSegmentOffsets
 
@@ -80,7 +82,7 @@ _splitSegmentByEscapedDelims delim pretoken text
     | secondChar /= tdelim = T.append pretoken token : _splitSegmentByEscapedDelims delim T.empty (T.drop 1 next)
     --                     ^ This is an actual separator, not an escaped separator. Return the accumulated token
     | otherwise = []
-    --          ^ should be unreachable
+    --          ^ should be unreachable (but the linter complains)
                     where tdelim = T.singleton delim
                           (token, next) = T.breakOn tdelim text
                           secondChar = T.drop 1 $ T.take 2 next
@@ -110,6 +112,35 @@ getTextSegment length = do
     if all (T.all isAscii . fst) keyvals then return () else fail "Specified keys are not ASCII"
     return $! TextSegment acDelimiter $ Map.fromList keyvals
 
+
+updateHeader :: Header -> TextSegment -> Get Header
+updateHeader initialHeader primaryText = Header
+                                    (version initialHeader)
+                                    (textOffsets initialHeader)
+                                <$> (SegmentOffsets
+                                    <$> parseKeyval (T.pack "$BEGINSTEXT") (keyvals primaryText)
+                                    <*> parseKeyval (T.pack "$ENDSTEXT") (keyvals primaryText)
+                                    )
+                                <*> (SegmentOffsets
+                                    <$> parseKeyval (T.pack "$BEGINDATA") (keyvals primaryText)
+                                    <*> parseKeyval (T.pack "$ENDDATA") (keyvals primaryText)
+                                    )
+                                <*> (SegmentOffsets
+                                    <$> parseKeyval (T.pack "$BEGINANALYSIS") (keyvals primaryText)
+                                    <*> parseKeyval (T.pack "$ENDANALYSIS")  (keyvals primaryText)
+                                    )
+
+data Parameter = Parameter
+    { storedLength :: Int64
+    , scale :: Int64
+
+    } deriving (Show)
+
+getParameter :: Int64 -> Map.Map T.Text T.Text -> Get Parameter
+getParameter i keyvalues = Parameter
+                    <$> parseKeyval (T.pack $ "$P" ++ show i ++ "B") keyvalues
+                    <*> parseKeyval (T.pack $ "$P" ++ show i ++ "E") keyvalues
+
 data FCS = FCS
     { header :: Header
     , primaryText :: TextSegment
@@ -117,9 +148,11 @@ data FCS = FCS
 
 getFCS :: Get FCS
 getFCS = do
-    header <- lookAhead getHeader
-    skip $ fromIntegral . start . textOffsets $ header
-    textSegment <- getTextSegment $ fromIntegral $ 1 + (end . textOffsets $ header) - (start . textOffsets $ header)
+    initialHeader <- lookAhead getHeader
+    textSegment <- lookAhead $
+           skip (fromIntegral . start . textOffsets $ initialHeader)
+           >> getTextSegment (fromIntegral $ 1 + (end . textOffsets $ initialHeader) - (start . textOffsets $ initialHeader))
+    header <- updateHeader initialHeader textSegment
     return $! FCS header textSegment
 
 readFCS :: FilePath -> IO ()
@@ -135,10 +168,15 @@ getAsciiString n = getByteString n >>= parseASCII
             Nothing -> fail "Unable to decode ASCII string"
             Just val -> return val
 
-lookaheadReadFromOffset :: Int -> Get a -> Get a
-lookaheadReadFromOffset n decoder = skip n *> lookAhead decoder
+readMaybeText :: Read a => T.Text -> Maybe a
+readMaybeText = readMaybe . T.unpack
 
 maybeGet :: String -> Maybe a -> Get a
 maybeGet errMsg m = case m of
     Just a -> return a
     Nothing -> fail errMsg
+
+parseKeyval :: Read a => T.Text -> Map.Map T.Text T.Text -> Get a
+parseKeyval key map = case Map.lookup key map of
+                Nothing -> fail $ T.unpack key ++ " keyval pair missing!"
+                Just val -> maybeGet (T.unpack key ++ " value failed to parse.") (readMaybeText val)
