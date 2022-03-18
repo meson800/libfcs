@@ -10,7 +10,7 @@ import qualified ASCII
 import qualified ASCII.Char as AC
 import Text.Read (readMaybe)
 import Data.Void (Void)
-import Control.Monad (liftM)
+import Control.Monad (liftM, liftM2, liftM3)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import qualified Data.Text.Encoding
@@ -130,16 +130,80 @@ updateHeader initialHeader primaryText = Header
                                     <*> parseKeyval (T.pack "$ENDANALYSIS")  (keyvals primaryText)
                                     )
 
-data Parameter = Parameter
-    { storedLength :: Int64
-    , scale :: Int64
 
+data AmplificationType = AmplificationType
+    { logDecades :: Float
+    , offset :: Float
     } deriving (Show)
+
+data VisualizationScale = Linear | Logarithmic deriving (Enum, Show)
+toVizScale :: T.Text -> Get VisualizationScale
+toVizScale text
+    | text == T.pack "Linear" = return Linear
+    | text == T.pack "Logarithmic" = return Logarithmic
+    | otherwise = fail "Invalid visualization scale"
+
+data ParameterVisualizationScale = ParameterVisualizationScale
+    { scale :: VisualizationScale
+    , f1 :: Float
+    , f2 :: Float
+    } deriving (Show)
+
+data Parameter = Parameter
+    { bitLength :: Int64  -- PnB
+    , amplification :: AmplificationType -- PnE
+    , shortName :: T.Text -- PnN
+    , range :: Int64 -- PnR
+    -- Optional parameters
+    , vizScale :: Maybe ParameterVisualizationScale -- PnD
+    , filter :: Maybe T.Text -- PnF
+    , gain :: Maybe Float -- PnG
+    , excitationWavelength :: Maybe [Int64] -- PnL
+    , excitationPower :: Maybe Int64 -- PnO
+    , percentLightCollected :: Maybe Float -- PnP
+    , name :: Maybe T.Text -- PnS
+    , detectorType :: Maybe T.Text -- PnT
+    , detectorVoltage :: Maybe Float -- PnV
+    } deriving (Show)
+
 
 getParameter :: Int64 -> Map.Map T.Text T.Text -> Get Parameter
 getParameter i keyvalues = Parameter
                     <$> parseKeyval (T.pack $ "$P" ++ show i ++ "B") keyvalues
-                    <*> parseKeyval (T.pack $ "$P" ++ show i ++ "E") keyvalues
+                    <*> ((\[decades, offset] -> liftM2 AmplificationType
+                            (maybeGet "Unable to parse amplification decades type" (readMaybeText decades))
+                            (maybeGet "Unable to parse amplification offset" (readMaybeText offset))
+                        ) =<< parseTokens 2 (T.singleton ',') (T.pack $ "$P" ++ show i ++ "E") keyvalues)
+                    <*> maybeGet ("$P" ++ show i ++ "N key missing!") (Map.lookup (T.pack $ "$P" ++ show i ++ "N") keyvalues)
+                    <*> parseKeyval (T.pack $ "$P" ++ show i ++ "R") keyvalues
+                    <*> (if Map.notMember (T.pack $ "$P" ++ show i ++ "D") keyvalues then return Nothing else (\[scale, f1, f2] -> Just <$> liftM3 ParameterVisualizationScale
+                            (toVizScale scale)
+                            (maybeGet "Unable to parse visualization parameter 1" (readMaybeText f1))
+                            (maybeGet "Unable to parse visualization parameter 2" (readMaybeText f2))
+                        ) =<< parseTokens 3 (T.singleton ',') (T.pack $ "$P" ++ show i ++ "D") keyvalues)
+                    <*> return (Map.lookup (T.pack $ "$P" ++ show i ++ "F") keyvalues)
+                    <*> maybeParseKeyval (T.pack $ "$P" ++ show i ++ "G") keyvalues
+                    <*> maybeParseList (T.singleton ',') (T.pack $ "$P" ++ show i ++ "L") keyvalues
+                    <*> maybeParseKeyval (T.pack $ "$P" ++ show i ++ "O") keyvalues
+                    <*> maybeParseKeyval (T.pack $ "$P" ++ show i ++ "P") keyvalues
+                    <*> return (Map.lookup (T.pack $ "$P" ++ show i ++ "S") keyvalues)
+                    <*> return (Map.lookup (T.pack $ "$P" ++ show i ++ "T") keyvalues)
+                    <*> maybeParseKeyval (T.pack $ "$P" ++ show i ++ "F") keyvalues
+
+data FCSMetadata = FCSMetadata
+    { mode :: T.Text -- MODE
+    , byteOrder :: T.Text -- BYTEORD
+    , nParameters :: Int64 -- PAR
+    , nEvents :: Int64 -- TOT
+    , parameters :: [Parameter]
+    , extraKeyvals :: Map.Map T.Text T.Text
+    -- Optional parameters
+    , nEventsLost :: Maybe Int64 -- ABRT
+    , acquireTime :: Maybe T.Text -- BTIM
+    , cells :: Maybe T.Text -- CELLS
+    , comment :: Maybe T.Text -- COM
+    , cellSubsetMode :: Maybe T.Text
+    } deriving (Show)
 
 data FCS = FCS
     { header :: Header
@@ -154,6 +218,7 @@ getFCS = do
            >> getTextSegment (fromIntegral $ 1 + (end . textOffsets $ initialHeader) - (start . textOffsets $ initialHeader))
     header <- updateHeader initialHeader textSegment
     return $! FCS header textSegment
+-- TODO: handle multiple segments by looking at the NEXTDATA offset. We can just consume the input and move on.
 
 readFCS :: FilePath -> IO ()
 readFCS filename = do
@@ -180,3 +245,23 @@ parseKeyval :: Read a => T.Text -> Map.Map T.Text T.Text -> Get a
 parseKeyval key map = case Map.lookup key map of
                 Nothing -> fail $ T.unpack key ++ " keyval pair missing!"
                 Just val -> maybeGet (T.unpack key ++ " value failed to parse.") (readMaybeText val)
+
+maybeParseKeyval :: Read a => T.Text -> Map.Map T.Text T.Text -> Get (Maybe a)
+maybeParseKeyval key map = case Map.lookup key map of
+                    Nothing -> return Nothing
+                    Just val -> Just <$> maybeGet (T.unpack key ++ " value failed to parse.") (readMaybeText val)
+
+parseTokens :: Int -> T.Text -> T.Text -> Map.Map T.Text T.Text -> Get [T.Text]
+parseTokens n delim key map = case Map.lookup key map of
+                Nothing -> fail $ T.unpack key ++ " keyval pair missing!"
+                Just allTokens ->
+                    if length tokens == n
+                    then return tokens
+                    else fail $ T.unpack key ++ " value failed to tokenize."
+                    where tokens = T.splitOn delim allTokens
+
+maybeParseList :: Read a => T.Text -> T.Text -> Map.Map T.Text T.Text -> Get (Maybe [a])
+maybeParseList delim key map = case Map.lookup key map of
+                    Nothing -> return Nothing
+                    Just val -> return (mapM readMaybeText tokens)
+                        where tokens = T.splitOn delim val
