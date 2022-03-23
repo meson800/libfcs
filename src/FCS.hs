@@ -5,10 +5,11 @@ module FCS
     ( readFCS
     ) where
 
+import Control.Monad.Writer
 import Data.Time as Time
 import qualified Data.ByteString.Lazy as BL
 import Data.Int ( Int32, Int64 )
-import Data.Binary.Get (Get, getByteString, skip, lookAhead, Decoder(Fail), runGet)
+import Data.Binary.Get (Get, getByteString, getFloatle, getFloatbe, getDoublele, getDoublebe, skip, lookAhead, Decoder(Fail), runGet)
 import qualified ASCII
 import qualified ASCII.Char as AC
 import Text.Read (readMaybe)
@@ -18,9 +19,15 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding
+import qualified Data.Matrix as Matrix
 import Data.Char (isAscii)
 import Debug.Trace ( trace )
 import GHC.IO.Exception (IOException(ioe_filename))
+import Colog.Core (LogAction (LogAction))
+
+import qualified FCS.Shim as Shim
+import GHC.Float (float2Double)
+import qualified FCS.Shim as FCS
 
 data Version = Version
     { major :: !Int32
@@ -178,33 +185,40 @@ data Parameter = Parameter
 
 
 getParameter :: Map.Map T.Text T.Text -> Int64 -> Get Parameter
-getParameter keyvalues i = Parameter
-                    <$> parseKeyval (T.pack $ "$P" ++ show i ++ "B") keyvalues
-                    <*> ((\[decades, offset] -> liftM2 AmplificationType
-                            (maybeGet "Unable to parse amplification decades type" (readMaybeText decades))
-                            (maybeGet "Unable to parse amplification offset" (readMaybeText offset))
-                        ) =<< parseTokens 2 (T.singleton ',') (T.pack $ "$P" ++ show i ++ "E") keyvalues)
-                    <*> maybeGet ("$P" ++ show i ++ "N key missing!") (Map.lookup (T.pack $ "$P" ++ show i ++ "N") keyvalues)
-                    <*> parseKeyval (T.pack $ "$P" ++ show i ++ "R") keyvalues
-                    <*> (if Map.notMember (T.pack $ "$P" ++ show i ++ "D") keyvalues then return Nothing else (\[scale, f1, f2] -> Just <$> liftM3 ParameterVisualizationScale
-                            (toVizScale scale)
-                            (maybeGet "Unable to parse visualization parameter 1" (readMaybeText f1))
-                            (maybeGet "Unable to parse visualization parameter 2" (readMaybeText f2))
-                        ) =<< parseTokens 3 (T.singleton ',') (T.pack $ "$P" ++ show i ++ "D") keyvalues)
-                    <*> return (Map.lookup (T.pack $ "$P" ++ show i ++ "F") keyvalues)
-                    <*> maybeParseKeyval (T.pack $ "$P" ++ show i ++ "G") keyvalues
-                    <*> maybeParseList (T.singleton ',') (T.pack $ "$P" ++ show i ++ "L") keyvalues
-                    <*> maybeParseKeyval (T.pack $ "$P" ++ show i ++ "O") keyvalues
-                    <*> maybeParseKeyval (T.pack $ "$P" ++ show i ++ "P") keyvalues
-                    <*> return (Map.lookup (T.pack $ "$P" ++ show i ++ "S") keyvalues)
-                    <*> return (Map.lookup (T.pack $ "$P" ++ show i ++ "T") keyvalues)
-                    <*> maybeParseKeyval (T.pack $ "$P" ++ show i ++ "F") keyvalues
-                    <*> (if Map.notMember (T.pack $ "$P" ++ show i ++ "CALIBRATION") keyvalues then return Nothing else (\[cFactor, name] -> Just <$> liftM2 ParameterCalibration
-                            (maybeGet "Unable to parse parameter calibration unit conversion" (readMaybeText cFactor))
-                            (return name)
-                        ) =<< parseTokens 2 (T.singleton  ',') (T.pack $ "$P" ++ show i ++ "CALIBRATION") keyvalues)
+getParameter keyvalues i = do
+                bitLength <- parseKeyval (T.pack $ "$P" ++ show i ++ "B") keyvalues
+                amplification <- (\[decades, offset] -> liftM2 AmplificationType
+                        (maybeGet "Unable to parse amplification decades type" (readMaybeText decades))
+                        (maybeGet "Unable to parse amplification offset" (readMaybeText offset))
+                    ) =<< parseTokens 2 (T.singleton ',') (T.pack $ "$P" ++ show i ++ "E") keyvalues
+                shortName <- maybeGet ("$P" ++ show i ++ "N key missing!") (Map.lookup (T.pack $ "$P" ++ show i ++ "N") keyvalues)
+                range <- parseKeyval (T.pack $ "$P" ++ show i ++ "R") keyvalues
+                unshimmedVizScale <- (if Map.notMember (T.pack $ "$P" ++ show i ++ "D") keyvalues then return Nothing else (\[scale, f1, f2] -> Just <$> liftM3 ParameterVisualizationScale
+                                (toVizScale scale)
+                                (maybeGet "Unable to parse visualization parameter 1" (readMaybeText f1))
+                                (maybeGet "Unable to parse visualization parameter 2" (readMaybeText f2))
+                    ) =<< parseTokens 3 (T.singleton ',') (T.pack $ "$P" ++ show i ++ "D") keyvalues)
+                let vizScale = (\case
+                                    Just vs -> Just $ ParameterVisualizationScale (scale vs) (f1 vs) (FCS.shimParameterScale (f1 vs) (f2 vs))
+                                    Nothing -> Nothing) unshimmedVizScale
+                let filter = Map.lookup (T.pack $ "$P" ++ show i ++ "F") keyvalues
+                gain <- maybeParseKeyval (T.pack $ "$P" ++ show i ++ "G") keyvalues
+                excitationWavelength <-  maybeParseList (T.singleton ',') (T.pack $ "$P" ++ show i ++ "L") keyvalues
+                excitationPower <- maybeParseKeyval (T.pack $ "$P" ++ show i ++ "O") keyvalues
+                percentLightCollected <- maybeParseKeyval (T.pack $ "$P" ++ show i ++ "P") keyvalues
+                let name = Map.lookup (T.pack $ "$P" ++ show i ++ "S") keyvalues
+                let detectorType = Map.lookup (T.pack $ "$P" ++ show i ++ "T") keyvalues
+                detectorVoltage <- maybeParseKeyval (T.pack $ "$P" ++ show i ++ "V") keyvalues
+                calibration <- (if Map.notMember (T.pack $ "$P" ++ show i ++ "CALIBRATION") keyvalues then return Nothing else (\[cFactor, name] -> Just <$> liftM2 ParameterCalibration
+                                    (maybeGet "Unable to parse parameter calibration unit conversion" (readMaybeText cFactor))
+                                    (return name)
+                                ) =<< parseTokens 2 (T.singleton  ',') (T.pack $ "$P" ++ show i ++ "CALIBRATION") keyvalues)
+                return $! Parameter bitLength amplification shortName range
+                                    vizScale filter gain excitationWavelength
+                                    excitationPower percentLightCollected name
+                                    detectorType detectorVoltage calibration
 
-data FCSMode = List | MultivariateHistogram | UnivariateHistograms deriving (Enum, Show)
+data FCSMode = List | MultivariateHistogram | UnivariateHistograms deriving (Enum, Show, Eq)
 toFCSMode :: T.Text -> Get FCSMode
 toFCSMode text
     | c == Just (T.singleton 'L') = return List
@@ -213,7 +227,17 @@ toFCSMode text
     | otherwise = fail "Unable to parse FCS mode"
     where c = if T.length text == 1 then Just text else Nothing
 
-data ByteOrder = LittleEndian | BigEndian deriving (Enum, Show)
+data Datatype = StoredInteger | StoredFloat | StoredDouble | StoredASCII deriving (Enum, Show, Eq)
+toDatatype :: T.Text -> Get Datatype
+toDatatype text
+    | c == Just (T.singleton 'I') = return StoredInteger
+    | c == Just (T.singleton 'F') = return StoredFloat
+    | c == Just (T.singleton 'D') = return StoredDouble
+    | c == Just (T.singleton 'A') = return StoredASCII
+    | otherwise = fail "Unable to parse datatype"
+    where c = if T.length text == 1 then Just text else Nothing
+
+data ByteOrder = LittleEndian | BigEndian deriving (Enum, Show, Eq)
 toByteOrder :: T.Text -> Get ByteOrder
 toByteOrder text
     | text == T.pack "1,2,3,4" = return LittleEndian
@@ -253,9 +277,25 @@ maybeCellSubset keyvals = case Map.lookup (T.pack "$CSMODE") keyvals of
             return (Just $ CellSubset numSimultaneousSubsets numSubsets subsetNBits flagMap)
 
 
+data Spillover = Spillover
+    { nParams :: Int64
+    , parameterNames :: [T.Text]
+    , spilloverMatrix :: Matrix.Matrix Float
+    } deriving (Show)
+
+getSpillover :: T.Text -> Get Spillover
+getSpillover val = do
+    n <- maybeGet "Unable to parse number of spillover parameters" $ readMaybeText $ head tokens
+    if length tokens /= 1 + n + n * n then fail "Invalid number of spillover parameters" else do
+        let parameterNames = (take n . drop 1) tokens
+        spillover <-  Matrix.fromList n n <$> maybeGet "Unable to parse spillover matrix" (mapM readMaybeText (take (n * n) . drop (1 + n) $ tokens))
+        return $! Spillover (fromIntegral n) parameterNames spillover
+    where tokens = T.splitOn (T.singleton ',') val
+
 
 data FCSMetadata = FCSMetadata
     { mode :: FCSMode -- MODE
+    , datatype :: Datatype -- DATATYPE
     , byteOrder :: ByteOrder -- BYTEORD
     , nParameters :: Int64 -- PAR
     , parameters :: [Parameter]
@@ -275,6 +315,11 @@ data FCSMetadata = FCSMetadata
     , experimenter :: Maybe T.Text -- EXP
     , operator :: Maybe T.Text -- OP
     , filename :: Maybe T.Text -- FIL
+-- GATE info
+-- PKn
+-- PKNn
+-- RnI
+-- RnW
     , lastModified :: Maybe Time.LocalTime -- LAST_MODIFIED
     , lastModifier :: Maybe T.Text -- LAST_MODIFIER
     , nEventsLost :: Maybe Int64 -- LOST
@@ -283,7 +328,7 @@ data FCSMetadata = FCSMetadata
     , plateName :: Maybe T.Text -- PLATENAME
     , project :: Maybe T.Text -- PROJ
     , specimen :: Maybe T.Text -- SMNO
---    , spillover :: Maybe T.Text -- SPILLOVER
+    , spillover :: Maybe Spillover -- SPILLOVER
     , specimenSource :: Maybe T.Text -- SRC
     , computer :: Maybe T.Text -- SYS
     , timestep :: Maybe Float -- TIMESTEP
@@ -296,13 +341,14 @@ data FCSMetadata = FCSMetadata
 getMetadata :: Map.Map T.Text T.Text -> Get FCSMetadata
 getMetadata keyvalues = do
     mode <- toFCSMode =<< maybeGet "Missing $MODE parameter" (Map.lookup (T.pack "$MODE") keyvalues)
+    datatype <- toDatatype =<< maybeGet "Missing $DATATYPE parameter" (Map.lookup (T.pack "$DATATYPE") keyvalues)
     byteOrder <- toByteOrder =<< maybeGet "Missing $BYTEORD parameter" (Map.lookup (T.pack "$BYTEORD") keyvalues)
     nParameters <- parseKeyval (T.pack "$PAR") keyvalues
     parameters <- mapM (getParameter keyvalues) [1..nParameters]
     nEvents <- parseKeyval (T.pack "$TOT") keyvalues
-    let extraKeyvals = Map.filter ((\case
+    let extraKeyvals = Map.filterWithKey (\k _ -> (\case
                                         Just val -> fst val /= '$'
-                                        Nothing -> False) . T.uncons) keyvalues
+                                        Nothing -> False) . T.uncons $ k) keyvalues
     nEventsAborted <- maybeParseKeyval (T.pack "$ABRT") keyvalues
     acquireStartTime <- maybeGetTime False Time.defaultTimeLocale  "%H:%M:%S%Q" $ Map.lookup (T.pack "$BTIM") keyvalues
     acquireDate <- maybeGetTime False Time.defaultTimeLocale "%d-%b-%0Y" $ Map.lookup (T.pack "$DATE") keyvalues
@@ -326,7 +372,9 @@ getMetadata keyvalues = do
     let plateName = Map.lookup (T.pack "$PLATENAME") keyvalues
     let project = Map.lookup (T.pack "$PROJ") keyvalues
     let specimen = Map.lookup (T.pack "$SMNO") keyvalues
-
+    spillover <- (\case
+                    Nothing -> return Nothing
+                    Just t -> Just <$> getSpillover t) $ Map.lookup (T.pack "$SPILLOVER") keyvalues
     let specimenSource = Map.lookup (T.pack "$SRC") keyvalues
     let computer = Map.lookup (T.pack "$SYS") keyvalues
     timestep <- maybeParseKeyval (T.pack "$TIMESTEP") keyvalues
@@ -337,17 +385,47 @@ getMetadata keyvalues = do
     let wellID = Map.lookup (T.pack "$WELLID") keyvalues
 
     return $! FCSMetadata
-                mode byteOrder nParameters parameters nEvents
+                mode datatype byteOrder nParameters parameters nEvents
                 extraKeyvals nEventsAborted acquireStartTime
                 acquireDate acquireEndTime cellSubset cells comment
                 cytometerType cytometerSN institution experimenter
                 operator filename lastModified lastModifier nEventsLost
-                originality plateID plateName project specimen
+                originality plateID plateName project specimen spillover
                 specimenSource computer timestep trigger volume wellID
+
+data DataSegment = DataSegment
+    { unprocessed :: Matrix.Matrix Double
+    , uncompensated :: Matrix.Matrix Double
+    , compensated :: Matrix.Matrix Double
+    } deriving (Show)
+
+getRawData :: FCSMetadata -> Get [Double]
+getRawData meta
+    | dtype == StoredDouble && endianness == LittleEndian = sequence [getDoublele | _ <- [1..len]]
+    | dtype == StoredDouble && endianness == BigEndian    = sequence [getDoublebe | _ <- [1..len]]
+    | dtype == StoredFloat  && endianness == LittleEndian = sequence [float2Double <$> getFloatle | _ <- [1..len]]
+    | dtype == StoredFloat  && endianness == BigEndian    = sequence [float2Double <$> getFloatbe | _ <- [1..len]]
+    | otherwise = fail "Unsupported datatype"
+    where dtype = datatype meta
+          endianness = byteOrder meta
+          len = nParameters meta * nEvents meta
+
+getData :: FCSMetadata -> Get DataSegment
+getData meta = do
+    unprocessedList <- getRawData meta
+    let unprocessed = Matrix.fromList nE nP unprocessedList
+    return $! DataSegment unprocessed unprocessed unprocessed
+    where nP = fromIntegral $ nParameters meta
+          nE = fromIntegral $ nEvents meta
+
+
+
 
 data FCS = FCS
     { header :: Header
     , primaryText :: TextSegment
+    , metadata :: FCSMetadata
+    , supplementalText :: Maybe TextSegment
     } deriving (Show)
 
 getFCS :: Get FCS
@@ -357,7 +435,17 @@ getFCS = do
            skip (fromIntegral . start . textOffsets $ initialHeader)
            >> getTextSegment (fromIntegral $ 1 + (end . textOffsets $ initialHeader) - (start . textOffsets $ initialHeader))
     header <- updateHeader initialHeader textSegment
-    return $! FCS header textSegment
+    supplementalText <- if (start . stextOffsets $ header) == 0 && (end . stextOffsets $ header) == 0 then return Nothing else
+                lookAhead $ skip (fromIntegral . start . stextOffsets $ header)
+                >> Just <$> getTextSegment (fromIntegral $ 1 + (end . stextOffsets $ header) - (start . stextOffsets $ header))
+    let preshimMetadataMap = \case
+                        Just stext -> Map.union (keyvals textSegment) (keyvals stext)
+                        Nothing -> keyvals textSegment
+                      $ supplementalText
+    (trace . show $ preshimMetadataMap) return()
+    let metadataMap = Shim.shimKeyvals preshimMetadataMap
+    metadata <- getMetadata metadataMap
+    return $! FCS header textSegment metadata supplementalText
 -- TODO: handle multiple segments by looking at the NEXTDATA offset. We can just consume the input and move on.
 
 readFCS :: FilePath -> IO ()
