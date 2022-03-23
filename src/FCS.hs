@@ -414,6 +414,9 @@ getData :: FCSMetadata -> Get DataSegment
 getData meta = do
     unprocessedList <- getRawData meta
     let unprocessed = Matrix.fromList nE nP unprocessedList
+    -- Map the transform function over the matrix to get the processed version.
+    -- Then, make permutation matrixes that move compensated columns into the right location
+    -- split the matrix, perform the compensation, then recombine the split matrices.
     return $! DataSegment unprocessed unprocessed unprocessed
     where nP = fromIntegral $ nParameters meta
           nE = fromIntegral $ nEvents meta
