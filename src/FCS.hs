@@ -401,14 +401,14 @@ data DataSegment = DataSegment
 
 getRawData :: FCSMetadata -> Get [Double]
 getRawData meta
-    | dtype == StoredDouble && endianness == LittleEndian = sequence [getDoublele | _ <- [1..len]]
-    | dtype == StoredDouble && endianness == BigEndian    = sequence [getDoublebe | _ <- [1..len]]
-    | dtype == StoredFloat  && endianness == LittleEndian = sequence [float2Double <$> getFloatle | _ <- [1..len]]
-    | dtype == StoredFloat  && endianness == BigEndian    = sequence [float2Double <$> getFloatbe | _ <- [1..len]]
+    | dtype == StoredDouble && endianness == LittleEndian = replicateM len getDoublele
+    | dtype == StoredDouble && endianness == BigEndian    = replicateM len getDoublebe
+    | dtype == StoredFloat  && endianness == LittleEndian = replicateM len float2Double <$> getFloatle
+    | dtype == StoredFloat  && endianness == BigEndian    = replicateM len float2Double <$> getFloatbe
     | otherwise = fail "Unsupported datatype"
     where dtype = datatype meta
           endianness = byteOrder meta
-          len = nParameters meta * nEvents meta
+          len = fromIntegral $ nParameters meta * nEvents meta
 
 getData :: FCSMetadata -> Get DataSegment
 getData meta = do
