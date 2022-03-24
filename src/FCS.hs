@@ -28,6 +28,7 @@ import Colog.Core (LogAction (LogAction))
 import qualified FCS.Shim as Shim
 import GHC.Float (float2Double)
 import qualified FCS.Shim as FCS
+import Data.Maybe (isJust, fromJust)
 
 data Version = Version
     { major :: !Int32
@@ -410,13 +411,28 @@ getRawData meta
           endianness = byteOrder meta
           len = fromIntegral $ nParameters meta * nEvents meta
 
---gainLogTransform :: Parameter -> Matrix.Matrix Double Double -> Matrix.Matrix Double Double
+gainLogTransform :: Parameter -> Matrix.Matrix Double -> Matrix.Matrix Double
+gainLogTransform param row
+    | isJust pGain = Matrix.mapPos (\(_,_) x -> x / fromJust pGain) row
+    | pLogDecades /= 0.0 = Matrix.mapPos (\(_,_) x -> 10**(pLogDecades * x / pRange) * pOffset) row
+    | otherwise = row
+    where pGain = float2Double <$> gain param :: Maybe Double
+          pLogDecades = float2Double $ logDecades $ amplification param :: Double
+          pOffset = float2Double $ offset $ amplification param :: Double
+          pRange = fromIntegral $ range param :: Double
+
+maybeCalibrationTransform :: Parameter -> Matrix.Matrix Double -> Matrix.Matrix Double
+maybeCalibrationTransform param row = \case
+                                        Just cal -> Matrix.mapPos (\(_,_) x -> x * factor) row
+                                            where factor = float2Double $ unitConversionFactor cal
+                                        Nothing -> row
+                                    $ calibration param
 
 getData :: FCSMetadata -> Get DataSegment
 getData meta = do
     unprocessedList <- getRawData meta
     let unprocessed = Matrix.fromList nE nP unprocessedList
-    let processed = Matrix.mapCol ()
+    --let processed = Matrix.mapCol ()
     -- Map the transform function over the matrix to get the processed version.
     -- Then, make permutation matrixes that move compensated columns into the right location
     -- split the matrix, perform the compensation, then recombine the split matrices.
