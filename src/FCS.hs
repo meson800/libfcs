@@ -411,28 +411,32 @@ getRawData meta
           endianness = byteOrder meta
           len = fromIntegral $ nParameters meta * nEvents meta
 
-gainLogTransform :: Parameter -> Matrix.Matrix Double -> Matrix.Matrix Double
-gainLogTransform param row
-    | isJust pGain = Matrix.mapPos (\(_,_) x -> x / fromJust pGain) row
-    | pLogDecades /= 0.0 = Matrix.mapPos (\(_,_) x -> 10**(pLogDecades * x / pRange) * pOffset) row
-    | otherwise = row
+gainLogTransform :: Parameter -> Double -> Double
+gainLogTransform param x
+    | isJust pGain = x / fromJust pGain
+    | pLogDecades /= 0.0 = 10**(pLogDecades * x / pRange) * pOffset
+    | otherwise = x
     where pGain = float2Double <$> gain param :: Maybe Double
           pLogDecades = float2Double $ logDecades $ amplification param :: Double
           pOffset = float2Double $ offset $ amplification param :: Double
           pRange = fromIntegral $ range param :: Double
 
-maybeCalibrationTransform :: Parameter -> Matrix.Matrix Double -> Matrix.Matrix Double
-maybeCalibrationTransform param row = \case
-                                        Just cal -> Matrix.mapPos (\(_,_) x -> x * factor) row
+maybeCalibrationTransform :: Parameter -> Double -> Double
+maybeCalibrationTransform param x = \case
+                                        Just cal -> x * factor
                                             where factor = float2Double $ unitConversionFactor cal
-                                        Nothing -> row
+                                        Nothing -> x
                                     $ calibration param
 
 getData :: FCSMetadata -> Get DataSegment
 getData meta = do
     unprocessedList <- getRawData meta
     let unprocessed = Matrix.fromList nE nP unprocessedList
-    --let processed = Matrix.mapCol ()
+    let processed = mapEveryCol colTransform unprocessed
+            where
+            colTransform i col =
+                maybeCalibrationTransform param . gainLogTransform param $ col
+                where param = parameters meta !! i
     -- Map the transform function over the matrix to get the processed version.
     -- Then, make permutation matrixes that move compensated columns into the right location
     -- split the matrix, perform the compensation, then recombine the split matrices.
@@ -527,3 +531,7 @@ maybeParseList delim key map = case Map.lookup key map of
                     Nothing -> return Nothing
                     Just val -> return (mapM readMaybeText tokens)
                         where tokens = T.splitOn delim val
+
+mapEveryCol :: (Int -> a -> a) -> Matrix.Matrix a -> Matrix.Matrix a
+mapEveryCol mapF initial = foldl (flip ($)) initial [Matrix.mapCol mapF i | i <- [1..Matrix.ncols initial]]
+
