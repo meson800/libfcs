@@ -8,8 +8,9 @@ module FCS
 import Control.Monad.Writer
 import Data.Time as Time
 import qualified Data.ByteString.Lazy as BL
+import Data.List (elemIndex)
 import Data.Int ( Int32, Int64 )
-import Data.Binary.Get (Get, getByteString, getFloatle, getFloatbe, getDoublele, getDoublebe, skip, lookAhead, Decoder(Fail), runGet)
+import Data.Binary.Get (Get, getByteString, getFloatle, getFloatbe, getDoublele, getDoublebe, skip, lookAhead, Decoder(Fail), runGet, isolate)
 import qualified ASCII
 import qualified ASCII.Char as AC
 import Text.Read (readMaybe)
@@ -398,14 +399,17 @@ data DataSegment = DataSegment
     { unprocessed :: Matrix.Matrix Double
     , uncompensated :: Matrix.Matrix Double
     , compensated :: Matrix.Matrix Double
-    } deriving (Show)
+    }
+instance Show DataSegment where
+    show x = "{num_parameters: " ++ show (Matrix.ncols $ unprocessed x)
+           ++", num_events: " ++ show (Matrix.nrows $ unprocessed x) ++ "}"
 
 getRawData :: FCSMetadata -> Get [Double]
 getRawData meta
     | dtype == StoredDouble && endianness == LittleEndian = replicateM len getDoublele
     | dtype == StoredDouble && endianness == BigEndian    = replicateM len getDoublebe
-    | dtype == StoredFloat  && endianness == LittleEndian = replicateM len float2Double <$> getFloatle
-    | dtype == StoredFloat  && endianness == BigEndian    = replicateM len float2Double <$> getFloatbe
+    | dtype == StoredFloat  && endianness == LittleEndian = replicateM len (float2Double <$> getFloatle)
+    | dtype == StoredFloat  && endianness == BigEndian    = replicateM len (float2Double <$> getFloatbe)
     | otherwise = fail "Unsupported datatype"
     where dtype = datatype meta
           endianness = byteOrder meta
@@ -428,6 +432,19 @@ maybeCalibrationTransform param x = \case
                                         Nothing -> x
                                     $ calibration param
 
+compensateData :: [Parameter] -> Spillover -> Matrix.Matrix Double -> Get (Matrix.Matrix Double)
+compensateData params spill uncomp = do
+    paramIndicies <- maybeGet "Invalid parameter name in spillover matrix" $ mapM (`elemIndex` map shortName params) (parameterNames spill)
+    compMatrix <- Matrix.mapPos (\(_,_) x -> float2Double x) <$> eitherGet "Uninvertible spillover matrix" (Matrix.inverse $ spilloverMatrix spill)
+    let nonIndicies = Prelude.filter  (`notElem` paramIndicies) [1..nTotParams]
+    let paramOrder = paramIndicies ++ nonIndicies
+    -- Construct a permutation matrix
+    let permMatrix = foldl (flip ($)) (Matrix.zero nTotParams nTotParams) (zipWith (curry (Matrix.unsafeSet 1.0)) paramOrder [1..nTotParams]) :: Matrix.Matrix Double
+    let (cBlock, uncBlock,_,_) = Matrix.splitBlocks nTotParams nCompParams (uncomp * permMatrix)
+    return ((cBlock * compMatrix Matrix.<|> uncBlock) * Matrix.transpose permMatrix)
+    where nTotParams = length params
+          nCompParams = fromIntegral $ nParams spill
+
 getData :: FCSMetadata -> Get DataSegment
 getData meta = do
     unprocessedList <- getRawData meta
@@ -437,21 +454,20 @@ getData meta = do
             colTransform i col =
                 maybeCalibrationTransform param . gainLogTransform param $ col
                 where param = parameters meta !! i
-    -- Map the transform function over the matrix to get the processed version.
-    -- Then, make permutation matrixes that move compensated columns into the right location
-    -- split the matrix, perform the compensation, then recombine the split matrices.
-    return $! DataSegment unprocessed unprocessed unprocessed
+    compensated <- \case
+                      Just spill -> compensateData (parameters meta) spill processed
+                      Nothing -> return processed
+                    $ spillover meta
+    return $! DataSegment unprocessed processed compensated
     where nP = fromIntegral $ nParameters meta
           nE = fromIntegral $ nEvents meta
-
-
-
 
 data FCS = FCS
     { header :: Header
     , primaryText :: TextSegment
     , metadata :: FCSMetadata
     , supplementalText :: Maybe TextSegment
+    , dataSegment :: DataSegment
     } deriving (Show)
 
 getFCS :: Get FCS
@@ -468,10 +484,12 @@ getFCS = do
                         Just stext -> Map.union (keyvals textSegment) (keyvals stext)
                         Nothing -> keyvals textSegment
                       $ supplementalText
-    (trace . show $ preshimMetadataMap) return()
     let metadataMap = Shim.shimKeyvals preshimMetadataMap
     metadata <- getMetadata metadataMap
-    return $! FCS header textSegment metadata supplementalText
+    dataSegment <- lookAhead $
+        skip (fromIntegral . start . dataOffsets $ header)
+        >> isolate (fromIntegral $ 1 + (end . dataOffsets $ header) - (start . dataOffsets $ header)) (getData metadata)
+    return $! FCS header textSegment metadata supplementalText dataSegment
 -- TODO: handle multiple segments by looking at the NEXTDATA offset. We can just consume the input and move on.
 
 readFCS :: FilePath -> IO ()
@@ -494,6 +512,11 @@ maybeGet :: String -> Maybe a -> Get a
 maybeGet errMsg m = case m of
     Just a -> return a
     Nothing -> fail errMsg
+
+eitherGet :: String -> Either String b -> Get b
+eitherGet errMsg m = case m of
+    Left a -> fail $ errMsg ++ ":" ++ a
+    Right b -> return b
 
 maybeGet2 :: (Maybe a, Maybe b) -> Get (a,b)
 maybeGet2 text = case text of
