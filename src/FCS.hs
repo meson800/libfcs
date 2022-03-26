@@ -1,5 +1,4 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE ForeignFunctionInterface #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Use bimap" #-}
 module FCS
@@ -21,7 +20,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding
 import qualified Data.Matrix as Matrix
 import Data.Char (isAscii)
-import Debug.Trace ( trace )
+--import Debug.Trace ( trace )
 
 import qualified FCS.Shim as Shim
 import GHC.Float (float2Double)
@@ -571,6 +570,3 @@ maybeParseList delim key map = case Map.lookup key map of
 
 mapEveryCol :: (Int -> a -> a) -> Matrix.Matrix a -> Matrix.Matrix a
 mapEveryCol mapF initial = foldl (flip ($)) initial [Matrix.mapCol mapF i | i <- [1..Matrix.ncols initial]]
-
--- Export list
-foreign export 

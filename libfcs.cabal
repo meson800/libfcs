@@ -22,7 +22,7 @@ foreign-library libfcs
     options:      standalone
     mod-def-file: libfcs.def
   
-  other-modules:    FCS, FCS.Shim
+  other-modules:    FCS, FCS.Shim, FCS.FFI
   build-depends:    base >= 4.7 && < 5,
                     ascii,
                     bytestring,
@@ -34,6 +34,7 @@ foreign-library libfcs
                     time,
                     matrix
   hs-source-dirs:   src
+  include-dirs:     csrc
   c-sources:        csrc/fcs.c
   default-language: Haskell2010
 

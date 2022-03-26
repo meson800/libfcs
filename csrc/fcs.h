@@ -4,14 +4,14 @@
 #include <stdlib.h>
 #include <stdint.h>
 
-struct StringUTF8 {
-    uint8_t* buffer,
-    size_t length
-};
+typedef struct StringUTF8 {
+    uint8_t* buffer;
+    size_t length;
+} StringUTF8;
 
-struct FCSFile {
-
-};
+typedef struct FCSFile {
+    StringUTF8 name;
+} FCSFile;
 
 bool libfcs_init();
 void libfcs_exit();
