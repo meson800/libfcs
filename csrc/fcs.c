@@ -1,9 +1,9 @@
-#include "fcs.h"
-
 #include "Rts.h"
+
+#include "fcs.h"
 #include "HsFFI.h"
 
-HsBool libfcs_init(void){
+bool libfcs_init(void){
   int argc = 2;
   char *argv[] = {"+RTS", "-A32m", NULL};
   char **pargv = argv;

@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ForeignFunctionInterface #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Use bimap" #-}
 module FCS
@@ -10,12 +11,10 @@ import Data.Time as Time
 import qualified Data.ByteString.Lazy as BL
 import Data.List (elemIndex)
 import Data.Int ( Int32, Int64 )
-import Data.Binary.Get (Get, getByteString, getFloatle, getFloatbe, getDoublele, getDoublebe, skip, lookAhead, Decoder(Fail), runGet, isolate)
+import Data.Binary.Get (Get, getByteString, getFloatle, getFloatbe, getDoublele, getDoublebe, skip, lookAhead, runGet, isolate)
 import qualified ASCII
 import qualified ASCII.Char as AC
 import Text.Read (readMaybe)
-import Data.Void (Void)
-import Control.Monad (liftM, liftM2, liftM3)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -23,8 +22,6 @@ import qualified Data.Text.Encoding
 import qualified Data.Matrix as Matrix
 import Data.Char (isAscii)
 import Debug.Trace ( trace )
-import GHC.IO.Exception (IOException(ioe_filename))
-import Colog.Core (LogAction (LogAction))
 
 import qualified FCS.Shim as Shim
 import GHC.Float (float2Double)
@@ -103,7 +100,7 @@ splitSegmentByEscapedDelims delim text = _splitSegmentByEscapedDelims delim T.em
 
 zipEveryOther :: [T.Text] -> [(T.Text, T.Text)]
 zipEveryOther (x:y:rest) = (x,y) : zipEveryOther rest
-zipEveryOther [x] = error "Cannot every-other zip a odd-numbered list"
+zipEveryOther [_] = error "Cannot every-other zip a odd-numbered list"
 zipEveryOther [] = []
 
 getSegmentKeyvals :: AC.Char -> T.Text -> Maybe [(T.Text, T.Text)]
@@ -574,3 +571,6 @@ maybeParseList delim key map = case Map.lookup key map of
 
 mapEveryCol :: (Int -> a -> a) -> Matrix.Matrix a -> Matrix.Matrix a
 mapEveryCol mapF initial = foldl (flip ($)) initial [Matrix.mapCol mapF i | i <- [1..Matrix.ncols initial]]
+
+-- Export list
+foreign export 
