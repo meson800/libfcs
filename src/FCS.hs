@@ -80,11 +80,6 @@ data TextSegment = TextSegment
     , keyvals   :: Map.Map T.Text T.Text
     } deriving (Show)
 
-getSegmentDelimiter :: T.Text -> Maybe Char
-getSegmentDelimiter text = case mfirst of
-                            Just first -> Just $ fst first
-                            Nothing -> Nothing
-                           where mfirst = T.uncons text
 
 _splitSegmentByEscapedDelims :: Char -> T.Text -> T.Text -> [T.Text]
 _splitSegmentByEscapedDelims delim pretoken text
@@ -111,19 +106,29 @@ zipEveryOther (x:y:rest) = (x,y) : zipEveryOther rest
 zipEveryOther [x] = error "Cannot every-other zip a odd-numbered list"
 zipEveryOther [] = []
 
-getSegmentKeyvals :: Char -> T.Text -> Maybe [(T.Text, T.Text)]
+getSegmentKeyvals :: AC.Char -> T.Text -> Maybe [(T.Text, T.Text)]
 getSegmentKeyvals delim text = if odd len then Nothing else Just $ zipEveryOther splits
-                               where splits = splitSegmentByEscapedDelims delim text
+                               where splits = splitSegmentByEscapedDelims (toEnum $ AC.toInt delim) text
                                      len = length splits
 
-getTextSegment :: Int -> Get TextSegment
-getTextSegment length = do
+textToDelimiter :: T.Text -> Maybe Char
+textToDelimiter text = case mfirst of
+                            Just first -> Just $ fst first
+                            Nothing -> Nothing
+                           where mfirst = T.uncons text
+
+getSegmentDelimiter :: Get AC.Char
+getSegmentDelimiter = do
+    firstChar <- Data.Text.Encoding.decodeUtf8 <$> getByteString 1
+    delimiter <- maybeGet "Text segment delimiter is invalid!" $ textToDelimiter firstChar
+    maybeGet "Delimiter is not an ASCII character" $ AC.fromIntMaybe . fromEnum $ delimiter
+
+getTextSegment :: Int -> AC.Char -> Get TextSegment
+getTextSegment length delimiter = do
     segment <- Data.Text.Encoding.decodeUtf8 <$> getByteString length
-    delimiter <- maybeGet "Text segment delimiter is invalid!" $ getSegmentDelimiter segment
-    acDelimiter <- maybeGet "Delimiter is not an ASCII character" $ AC.fromIntMaybe . fromEnum $ delimiter
     keyvals <- maybeGet "Text segment has invalid key-value specification" $ getSegmentKeyvals delimiter segment
     if all (T.all isAscii . fst) keyvals then return () else fail "Specified keys are not ASCII"
-    return $! TextSegment acDelimiter $ Map.fromList keyvals
+    return $! TextSegment delimiter $ Map.fromList keyvals
 
 
 updateHeader :: Header -> TextSegment -> Get Header
@@ -438,7 +443,7 @@ compensateData params spill uncomp = do
     compMatrix <- Matrix.mapPos (\(_,_) x -> float2Double x) <$> eitherGet "Uninvertible spillover matrix" (Matrix.inverse $ spilloverMatrix spill)
     let nonIndicies = Prelude.filter  (`notElem` paramIndicies) [1..nTotParams]
     let paramOrder = paramIndicies ++ nonIndicies
-    -- Construct a permutation matrix
+    -- Construct a permutation matrix that places compensated values in the order they appear in the compensation matrix, followed by all uncompensated values
     let permMatrix = foldl (flip ($)) (Matrix.zero nTotParams nTotParams) (zipWith (curry (Matrix.unsafeSet 1.0)) paramOrder [1..nTotParams]) :: Matrix.Matrix Double
     let (cBlock, uncBlock,_,_) = Matrix.splitBlocks nTotParams nCompParams (uncomp * permMatrix)
     return ((cBlock * compMatrix Matrix.<|> uncBlock) * Matrix.transpose permMatrix)
@@ -465,21 +470,27 @@ getData meta = do
 data FCS = FCS
     { header :: Header
     , primaryText :: TextSegment
-    , metadata :: FCSMetadata
     , supplementalText :: Maybe TextSegment
     , dataSegment :: DataSegment
+    , analysisSegment :: Maybe TextSegment
+    , metadata :: FCSMetadata
     } deriving (Show)
 
-getFCS :: Get FCS
-getFCS = do
+getSingleFCS :: Get (FCS, Int)
+getSingleFCS = do
     initialHeader <- lookAhead getHeader
+    delimiter <- lookAhead $ skip (fromIntegral . start . textOffsets $ initialHeader) >> getSegmentDelimiter
     textSegment <- lookAhead $
            skip (fromIntegral . start . textOffsets $ initialHeader)
-           >> getTextSegment (fromIntegral $ 1 + (end . textOffsets $ initialHeader) - (start . textOffsets $ initialHeader))
+           >> getTextSegment (fromIntegral $ 1 + (end . textOffsets $ initialHeader) - (start . textOffsets $ initialHeader)) delimiter
     header <- updateHeader initialHeader textSegment
     supplementalText <- if (start . stextOffsets $ header) == 0 && (end . stextOffsets $ header) == 0 then return Nothing else
                 lookAhead $ skip (fromIntegral . start . stextOffsets $ header)
-                >> Just <$> getTextSegment (fromIntegral $ 1 + (end . stextOffsets $ header) - (start . stextOffsets $ header))
+                >> Just <$> getTextSegment (fromIntegral $ 1 + (end . stextOffsets $ header) - (start . stextOffsets $ header)) delimiter
+    analysisSegment <- if (start . analysisOffsets $ header) == 0 && (end . analysisOffsets $ header) == 0 then return Nothing else
+                lookAhead $ skip (fromIntegral . start . analysisOffsets $ header)
+                >> Just <$> getTextSegment (fromIntegral $ 1 + (end . analysisOffsets $ header) - (start . analysisOffsets $ header)) delimiter
+    nextOffset <- parseKeyval (T.pack "$NEXTDATA") $ keyvals textSegment
     let preshimMetadataMap = \case
                         Just stext -> Map.union (keyvals textSegment) (keyvals stext)
                         Nothing -> keyvals textSegment
@@ -489,8 +500,14 @@ getFCS = do
     dataSegment <- lookAhead $
         skip (fromIntegral . start . dataOffsets $ header)
         >> isolate (fromIntegral $ 1 + (end . dataOffsets $ header) - (start . dataOffsets $ header)) (getData metadata)
-    return $! FCS header textSegment metadata supplementalText dataSegment
--- TODO: handle multiple segments by looking at the NEXTDATA offset. We can just consume the input and move on.
+    return (FCS header textSegment supplementalText dataSegment analysisSegment metadata, nextOffset)
+
+getFCS :: Get [FCS]
+getFCS = do
+    (fcs, next) <- getSingleFCS
+    rest <- if next /= 0 then skip next >> getFCS else return []
+    return (fcs : rest)
+
 
 readFCS :: FilePath -> IO ()
 readFCS filename = do
@@ -557,4 +574,3 @@ maybeParseList delim key map = case Map.lookup key map of
 
 mapEveryCol :: (Int -> a -> a) -> Matrix.Matrix a -> Matrix.Matrix a
 mapEveryCol mapF initial = foldl (flip ($)) initial [Matrix.mapCol mapF i | i <- [1..Matrix.ncols initial]]
-

@@ -1,0 +1,3 @@
+EXPORTS
+    libfcs_init
+    libfcs_exit

@@ -1,5 +1,5 @@
 name:                libfcs
-version:             0.1.0.0
+version:             0.0.0.1
 -- synopsis:
 -- description:
 homepage:            https://github.com/meson800/libfcs#readme
@@ -10,12 +10,37 @@ maintainer:          meson800@gmail.com
 copyright:           2022 Christopher Johnstone
 category:            Science
 build-type:          Simple
-extra-source-files:  README.md
+extra-source-files: 
+  README.md
+  CHANGELOG.md
 cabal-version:       >=1.10
+
+foreign-library libfcs
+  type: native-shared
+
+  if os(Windows)
+    options:      standalone
+    mod-def-file: libfcs.def
+  
+  other-modules:    FCS, FCS.Shim
+  build-depends:    base >= 4.7 && < 5,
+                    ascii,
+                    bytestring,
+                    binary,
+                    containers,
+                    co-log-core,
+                    mtl,
+                    text,
+                    time,
+                    matrix
+  hs-source-dirs:   src
+  c-sources:        csrc/fcs.c
+  default-language: Haskell2010
 
 library
   hs-source-dirs:      src
   exposed-modules:     FCS, FCS.Shim
+  ghc-options: -Wall -Wcompat
   build-depends:       base >= 4.7 && < 5,
                        ascii,
                        bytestring,
