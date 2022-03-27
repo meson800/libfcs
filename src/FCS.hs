@@ -458,7 +458,7 @@ getData meta = do
             where
             colTransform i col =
                 maybeCalibrationTransform param . gainLogTransform param $ col
-                where param = parameters meta !! i
+                where param = parameters meta !! (i - 1)
     compensated <- \case
                       Just spill -> compensateData (parameters meta) spill processed
                       Nothing -> return processed
