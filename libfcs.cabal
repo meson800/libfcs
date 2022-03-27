@@ -36,11 +36,12 @@ foreign-library libfcs
   hs-source-dirs:   src
   include-dirs:     csrc
   c-sources:        csrc/fcs.c
+  install-includes: fcs.h
   default-language: Haskell2010
 
 library
   hs-source-dirs:      src
-  exposed-modules:     FCS, FCS.Shim
+  exposed-modules:     FCS, FCS.Shim, FCS.FFI
   ghc-options: -Wall -Wcompat
   build-depends:       base >= 4.7 && < 5,
                        ascii,
@@ -52,6 +53,7 @@ library
                        text,
                        time,
                        matrix
+  include-dirs:     csrc
   default-language:    Haskell2010
 
 source-repository head

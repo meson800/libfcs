@@ -3,6 +3,10 @@
 {-# HLINT ignore "Use bimap" #-}
 module FCS
     ( readFCS
+    , FCS
+    , compensated
+    , uncompensated
+    , dataSegment
     ) where
 
 import Control.Monad.Writer
@@ -505,10 +509,10 @@ getFCS = do
     return (fcs : rest)
 
 
-readFCS :: FilePath -> IO ()
+readFCS :: FilePath -> IO [FCS]
 readFCS filename = do
     input <- BL.readFile filename
-    print $ runGet getFCS input
+    return (runGet getFCS input)
 
 -- Useful trick: (trace . show $ header) return() in do-statement
 -- Helper functions

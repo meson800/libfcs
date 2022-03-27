@@ -1,7 +1,8 @@
 #include "Rts.h"
+#include "HsFFI.h"
 
 #include "fcs.h"
-#include "HsFFI.h"
+#include "FFI_stub.h"
 
 bool libfcs_init(void){
   int argc = 2;
@@ -15,6 +16,9 @@ bool libfcs_init(void){
   return true;
 }
 
+FCSFile* load_FCS(const char* filename) {
+  return loadFCS(filename);
+}
 void libfcs_exit(void){
   hs_exit();
 }
