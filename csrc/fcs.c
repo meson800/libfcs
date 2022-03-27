@@ -17,7 +17,7 @@ bool libfcs_init(void){
 }
 
 FCSFile* load_FCS(const char* filename) {
-  return loadFCS(filename);
+  return loadFCS((HsPtr)filename);
 }
 void libfcs_exit(void){
   hs_exit();
