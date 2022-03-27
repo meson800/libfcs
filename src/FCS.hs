@@ -9,7 +9,7 @@ module FCS
     , dataSegment
     ) where
 
-import Control.Monad.Writer
+import Control.Monad (replicateM, liftM2, liftM3)
 import Data.Time as Time
 import qualified Data.ByteString.Lazy as BL
 import Data.List (elemIndex)

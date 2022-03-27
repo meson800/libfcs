@@ -28,8 +28,6 @@ foreign-library libfcs
                     bytestring,
                     binary,
                     containers,
-                    co-log-core,
-                    mtl,
                     text,
                     time,
                     matrix
@@ -37,6 +35,8 @@ foreign-library libfcs
   include-dirs:     csrc
   c-sources:        csrc/fcs.c
   install-includes: fcs.h
+  ghc-options:      -fPIC
+  cc-options:       -DLIBFCS_EXPORTS
   default-language: Haskell2010
 
 library

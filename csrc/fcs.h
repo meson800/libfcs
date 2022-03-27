@@ -1,5 +1,20 @@
 #ifndef LIBFCS_HEADER
 #define LIBFCS_HEADER
+#ifndef LIBFCS_EXPORT
+#ifdef LIBFCS_EXPORTS
+#ifdef _WIN32
+#define LIBFCS_EXPORT __declspec(dllexport)
+#else
+#define LIBFCS_EXPORT __attribute__ ((visibility("default")))
+#endif
+#else
+#ifdef _WIN32
+#define LIBFCS_EXPORT __declspec(dllimport)
+#else
+#define LIBFCS_EXPORT
+#endif
+#endif
+#endif
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -21,8 +36,16 @@ typedef struct FCSFile {
     DataBuffer compensated;
 } FCSFile;
 
-bool libfcs_init();
-FCSFile* load_FCS(const char* filename);
-void libfcs_exit();
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
+LIBFCS_EXPORT bool libfcs_init();
+LIBFCS_EXPORT FCSFile* load_FCS(const char* filename);
+LIBFCS_EXPORT void libfcs_exit();
+
+#if defined(__cplusplus)
+}
+#endif
 
 #endif

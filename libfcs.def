@@ -1,3 +1,4 @@
 EXPORTS
     libfcs_init
+    load_FCS
     libfcs_exit
