@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Use bimap" #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 module FCS
     ( readFCS
     , FCS
@@ -573,4 +574,5 @@ maybeParseList delim key map = case Map.lookup key map of
                         where tokens = T.splitOn delim val
 
 mapEveryCol :: (Int -> a -> a) -> Matrix.Matrix a -> Matrix.Matrix a
-mapEveryCol mapF initial = foldl (flip ($)) initial [Matrix.mapCol mapF i | i <- [1..Matrix.ncols initial]]
+-- Maps the same function over an entire column, passing it the _column_ index
+mapEveryCol mapF initial = foldl (flip ($)) initial [Matrix.mapCol (\_ x -> mapF i x) i | i <- [1..Matrix.ncols initial]]
