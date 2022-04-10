@@ -30,6 +30,7 @@ foreign-library libfcs
                     containers,
                     text,
                     time,
+                    massiv,
                     matrix
   hs-source-dirs:   src
   include-dirs:     csrc
@@ -52,6 +53,7 @@ library
                        mtl,
                        text,
                        time,
+                       massiv,
                        matrix
   include-dirs:     csrc
   default-language:    Haskell2010

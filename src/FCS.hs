@@ -23,7 +23,10 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding
-import qualified Data.Matrix as Matrix
+import qualified Data.Matrix as DM
+import qualified Data.Massiv.Array as A
+import qualified Data.Massiv.Core as MC
+import Data.Massiv.Core.Index (Dimension (Dim1, Dim2), getDimension, unSz, Ix2 ((:.)))
 import Data.Char (isAscii)
 --import Debug.Trace ( trace )
 
@@ -31,6 +34,10 @@ import qualified FCS.Shim as Shim
 import GHC.Float (float2Double)
 import qualified FCS.Shim as FCS
 import Data.Maybe (isJust, fromJust)
+import Data.Massiv.Array ((<!?), (.><.))
+
+type SMatrixFloat = A.Matrix A.S Float
+type SMatrixDouble = A.Matrix A.S Double
 
 data Version = Version
     { major :: !Int32
@@ -288,7 +295,7 @@ maybeCellSubset keyvals = case Map.lookup (T.pack "$CSMODE") keyvals of
 data Spillover = Spillover
     { nParams :: Int64
     , parameterNames :: [T.Text]
-    , spilloverMatrix :: Matrix.Matrix Float
+    , spilloverMatrix :: SMatrixFloat
     } deriving (Show)
 
 getSpillover :: T.Text -> Get Spillover
@@ -296,7 +303,7 @@ getSpillover val = do
     n <- maybeGet "Unable to parse number of spillover parameters" $ readMaybeText $ head tokens
     if length tokens /= 1 + n + n * n then fail "Invalid number of spillover parameters" else do
         let parameterNames = (take n . drop 1) tokens
-        spillover <-  Matrix.fromList n n <$> maybeGet "Unable to parse spillover matrix" (mapM readMaybeText (take (n * n) . drop (1 + n) $ tokens))
+        spillover <-  A.resizeM (A.Sz (n :. n)) . A.fromList A.Seq <$> maybeGet "Unable to parse spillover matrix" (mapM readMaybeText (take (n * n) . drop (1 + n) $ tokens))
         return $! Spillover (fromIntegral n) parameterNames spillover
     where tokens = T.splitOn (T.singleton ',') val
 
@@ -402,13 +409,13 @@ getMetadata keyvalues = do
                 specimenSource computer timestep trigger volume wellID
 
 data DataSegment = DataSegment
-    { unprocessed :: Matrix.Matrix Double
-    , uncompensated :: Matrix.Matrix Double
-    , compensated :: Matrix.Matrix Double
+    { unprocessed :: SMatrixDouble
+    , uncompensated :: SMatrixDouble
+    , compensated :: SMatrixDouble
     }
 instance Show DataSegment where
-    show x = "{num_parameters: " ++ show (Matrix.ncols $ unprocessed x)
-           ++", num_events: " ++ show (Matrix.nrows $ unprocessed x) ++ "}"
+    show x = "{num_parameters: " ++ show (getDimension (unSz $ A.size $ unprocessed x) Dim1)
+           ++", num_events: " ++ show (getDimension (unSz $ A.size $ unprocessed x) Dim2) ++ "}"
 
 getRawData :: FCSMetadata -> Get [Double]
 getRawData meta
@@ -422,49 +429,51 @@ getRawData meta
           len = fromIntegral $ nParameters meta * nEvents meta
 
 gainLogTransform :: Parameter -> Double -> Double
-gainLogTransform param x
-    | isJust pGain = x / fromJust pGain
-    | pLogDecades /= 0.0 = 10**(pLogDecades * x / pRange) * pOffset
-    | otherwise = x
+gainLogTransform param
+    | isJust pGain = \x -> x / fromJust pGain
+    | pLogDecades /= 0.0 = \x -> 10**(pLogDecades * x / pRange) * pOffset
+    | otherwise = id
     where pGain = float2Double <$> gain param :: Maybe Double
           pLogDecades = float2Double $ logDecades $ amplification param :: Double
           pOffset = float2Double $ offset $ amplification param :: Double
           pRange = fromIntegral $ range param :: Double
 
-maybeCalibrationTransform :: Parameter -> Double -> Double
-maybeCalibrationTransform param x = \case
-                                        Just cal -> x * factor
-                                            where factor = float2Double $ unitConversionFactor cal
-                                        Nothing -> x
-                                    $ calibration param
+getCalibrationTransform :: Parameter -> Double -> Double
+getCalibrationTransform param = \case
+                                    Just cal -> \x -> x * float2Double (unitConversionFactor cal)
+                                    Nothing -> id
+                                $ calibration param
 
-compensateData :: [Parameter] -> Spillover -> Matrix.Matrix Double -> Get (Matrix.Matrix Double)
+compensateData :: [Parameter] -> Spillover -> A.Matrix A.S Double -> Get SMatrixDouble
 compensateData params spill uncomp = do
     paramIndicies <- maybeGet "Invalid parameter name in spillover matrix" $ mapM (`elemIndex` map shortName params) (parameterNames spill)
-    compMatrix <- Matrix.mapPos (\(_,_) x -> float2Double x) <$> eitherGet "Uninvertible spillover matrix" (Matrix.inverse $ spilloverMatrix spill)
-    let nonIndicies = Prelude.filter  (`notElem` paramIndicies) [1..nTotParams]
-    let paramOrder = paramIndicies ++ nonIndicies
-    -- Construct a permutation matrix that places compensated values in the order they appear in the compensation matrix, followed by all uncompensated values
-    let permMatrix = foldl (flip ($)) (Matrix.zero nTotParams nTotParams) (zipWith (curry (Matrix.unsafeSet 1.0)) paramOrder [1..nTotParams]) :: Matrix.Matrix Double
-    let (cBlock, uncBlock,_,_) = Matrix.splitBlocks nTotParams nCompParams (uncomp * permMatrix)
-    return ((cBlock * compMatrix Matrix.<|> uncBlock) * Matrix.transpose permMatrix)
-    where nTotParams = length params
-          nCompParams = fromIntegral $ nParams spill
+    compMatrix <- fmap (A.map float2Double) (massivInvert $ spilloverMatrix spill)
+    precompSlices <- mapM (uncomp <!?) paramIndicies -- :: Get [A.Array A.DL A.Ix1 Double]
+    precomp <- A.stackInnerSlicesM precompSlices -- :: Get (A.Matrix A.DL Double)
+    compSlices <- A.innerSlices <$> A.computeAs A.DL precomp .><. A.computeAs A.DL compMatrix
+    let applyMonad = uncurry (A.replaceSlice 2)
+    let test = A.zip (A.fromList A.Seq paramIndicies) compSlices -- :: A.Array A.D A.Ix1 (Int, A.Array A.M A.Ix1 Double)
+    A.computeAs A.S <$> A.foldrM applyMonad (A.toLoadArray uncomp) test
 
 getData :: FCSMetadata -> Get DataSegment
 getData meta = do
     unprocessedList <- getRawData meta
-    let unprocessed = Matrix.fromList nE nP unprocessedList
-    let processed = mapEveryCol colTransform unprocessed
-            where
-            colTransform i col =
-                maybeCalibrationTransform param . gainLogTransform param $ col
-                where param = parameters meta !! (i - 1)
-    compensated <- \case
-                      Just spill -> compensateData (parameters meta) spill processed
-                      Nothing -> return processed
-                    $ spillover meta
-    return $! DataSegment unprocessed processed compensated
+    unprocessed <- A.resizeM (A.Sz (nP :. nE)) . A.fromList A.Seq $ unprocessedList
+    let cols = A.innerSlices unprocessed
+    let mapped = A.imap (\i col -> let param = parameters meta !! i
+                                   in A.map (getCalibrationTransform param . gainLogTransform param) col) cols
+    processed <- A.stackInnerSlicesM mapped
+    -- A.innerSlices ->
+    --let processed = mapEveryCol colTransform unprocessed
+    --        where
+    --        colTransform i col =
+    --            maybeCalibrationTransform param . gainLogTransform param $ col
+    --            where param = parameters meta !! (i - 1)
+    --compensated <- \case
+    --                  Just spill -> compensateData (parameters meta) spill processed
+    --                  Nothing -> return processed
+    --                $ spillover meta
+    return $! DataSegment unprocessed (A.compute processed) unprocessed
     where nP = fromIntegral $ nParameters meta
           nE = fromIntegral $ nEvents meta
 
@@ -573,6 +582,15 @@ maybeParseList delim key map = case Map.lookup key map of
                     Just val -> return (mapM readMaybeText tokens)
                         where tokens = T.splitOn delim val
 
-mapEveryCol :: (Int -> a -> a) -> Matrix.Matrix a -> Matrix.Matrix a
+mapEveryCol :: (Int -> a -> a) -> DM.Matrix a -> DM.Matrix a
 -- Maps the same function over an entire column, passing it the _column_ index
-mapEveryCol mapF initial = foldl (flip ($)) initial [Matrix.mapCol (\_ x -> mapF i x) i | i <- [1..Matrix.ncols initial]]
+mapEveryCol mapF initial = foldl (flip ($)) initial [DM.mapCol (\_ x -> mapF i x) i | i <- [1..DM.ncols initial]]
+
+
+massivInvert :: A.Matrix A.S a -> Get(A.Matrix A.D a)
+massivInvert x = do
+    let sz = A.size x
+    let ix = unSz sz
+    let dmX = DM.fromList (getDimension ix Dim1) (getDimension ix Dim2) $ A.toList x
+    xinv <- eitherGet "Uninvertible spillover matrix" $ DM.inverse dmX
+    A.resizeM sz $ A.fromList A.Seq (DM.toList xinv)
