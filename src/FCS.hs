@@ -303,7 +303,10 @@ getSpillover val = do
     n <- maybeGet "Unable to parse number of spillover parameters" $ readMaybeText $ head tokens
     if length tokens /= 1 + n + n * n then fail "Invalid number of spillover parameters" else do
         let parameterNames = (take n . drop 1) tokens
-        spillover <-  A.resizeM (A.Sz (n :. n)) . A.fromList A.Seq <$> maybeGet "Unable to parse spillover matrix" (mapM readMaybeText (take (n * n) . drop (1 + n) $ tokens))
+        spilloverLinear <- A.fromList A.Seq
+                        <$> maybeGet "Unable to parse spillover matrix"
+                            (mapM readMaybeText (take (n * n) . drop (1 + n) $ tokens))
+        spillover <- A.resizeM (A.Sz (n :. n)) spilloverLinear
         return $! Spillover (fromIntegral n) parameterNames spillover
     where tokens = T.splitOn (T.singleton ',') val
 
@@ -444,16 +447,23 @@ getCalibrationTransform param = \case
                                     Nothing -> id
                                 $ calibration param
 
+
+applyCompensationSlice :: (Int, A.Array A.D A.Ix1 Double) -> A.Array A.DL A.Ix2 Double -> Get (A.Array A.DL A.Ix2 Double)
+applyCompensationSlice slice x = uncurry (A.replaceSlice 2) slice (A.computeAs A.B x)
+
 compensateData :: [Parameter] -> Spillover -> A.Matrix A.S Double -> Get SMatrixDouble
 compensateData params spill uncomp = do
+    -- Extract the indicies of the parameters needing compensation
     paramIndicies <- maybeGet "Invalid parameter name in spillover matrix" $ mapM (`elemIndex` map shortName params) (parameterNames spill)
-    compMatrix <- fmap (A.map float2Double) (massivInvert $ spilloverMatrix spill)
-    precompSlices <- mapM (uncomp <!?) paramIndicies -- :: Get [A.Array A.DL A.Ix1 Double]
-    precomp <- A.stackInnerSlicesM precompSlices -- :: Get (A.Matrix A.DL Double)
-    compSlices <- A.innerSlices <$> A.computeAs A.DL precomp .><. A.computeAs A.DL compMatrix
-    let applyMonad = uncurry (A.replaceSlice 2)
-    let test = A.zip (A.fromList A.Seq paramIndicies) compSlices -- :: A.Array A.D A.Ix1 (Int, A.Array A.M A.Ix1 Double)
-    A.computeAs A.S <$> A.foldrM applyMonad (A.toLoadArray uncomp) test
+    -- Invert the spillover matrix to get a compensation matrix. Make it manifest
+    compMatrix <- A.computeAs A.B <$> fmap (A.map float2Double) (massivInvert $ spilloverMatrix spill)
+    -- Extract column vectors from uncompensated data
+    precompSlices <- mapM (uncomp <!?) paramIndicies
+    -- Re-stack column vectors into a matrix and make it manifest for matrix multiplication
+    precomp <- A.computeAs A.B <$>  A.stackInnerSlicesM precompSlices
+    -- Separate the compensated data into columns, pairing with the original parameter index
+    compSlices <- A.zip (A.fromList A.Seq paramIndicies :: A.Array A.B A.Ix1 Int) . A.innerSlices <$> (precomp .><. compMatrix)
+    A.computeAs A.S <$> A.foldrM applyCompensationSlice (A.toLoadArray uncomp) compSlices
 
 getData :: FCSMetadata -> Get DataSegment
 getData meta = do
@@ -462,18 +472,12 @@ getData meta = do
     let cols = A.innerSlices unprocessed
     let mapped = A.imap (\i col -> let param = parameters meta !! i
                                    in A.map (getCalibrationTransform param . gainLogTransform param) col) cols
-    processed <- A.stackInnerSlicesM mapped
-    -- A.innerSlices ->
-    --let processed = mapEveryCol colTransform unprocessed
-    --        where
-    --        colTransform i col =
-    --            maybeCalibrationTransform param . gainLogTransform param $ col
-    --            where param = parameters meta !! (i - 1)
-    --compensated <- \case
-    --                  Just spill -> compensateData (parameters meta) spill processed
-    --                  Nothing -> return processed
-    --                $ spillover meta
-    return $! DataSegment unprocessed (A.compute processed) unprocessed
+    processed <- A.computeAs A.S <$> A.stackInnerSlicesM mapped
+    compensated <- \case
+                      Just spill -> compensateData (parameters meta) spill processed
+                      Nothing -> return processed
+                    $ spillover meta
+    return $! DataSegment unprocessed processed compensated
     where nP = fromIntegral $ nParameters meta
           nE = fromIntegral $ nEvents meta
 
@@ -587,10 +591,13 @@ mapEveryCol :: (Int -> a -> a) -> DM.Matrix a -> DM.Matrix a
 mapEveryCol mapF initial = foldl (flip ($)) initial [DM.mapCol (\_ x -> mapF i x) i | i <- [1..DM.ncols initial]]
 
 
-massivInvert :: A.Matrix A.S a -> Get(A.Matrix A.D a)
+massivInvert :: A.Matrix A.S Float -> Get(A.Matrix A.P Float)
 massivInvert x = do
     let sz = A.size x
     let ix = unSz sz
     let dmX = DM.fromList (getDimension ix Dim1) (getDimension ix Dim2) $ A.toList x
     xinv <- eitherGet "Uninvertible spillover matrix" $ DM.inverse dmX
     A.resizeM sz $ A.fromList A.Seq (DM.toList xinv)
+
+instance A.MonadThrow Get where
+    throwM e = fail (show e)
