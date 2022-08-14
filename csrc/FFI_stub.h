@@ -3,6 +3,7 @@
 extern "C" {
 #endif
 extern HsPtr loadFCS(HsPtr a1);
+extern HsPtr freeFCS(HsPtr a1);
 #if defined(__cplusplus)
 }
 #endif

@@ -19,6 +19,24 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+enum FCSMode {
+    mode_List,
+    mode_MultivariateHistogram,
+    mode_UnivariateHistograms
+};
+
+enum Datatype {
+    type_StoredInteger,
+    type_StoredFloat,
+    type_StoredDouble,
+    type_StoredASCII
+};
+
+enum ByteOrder {
+    LittleEndian,
+    BigEndian
+};
+
 typedef struct StringUTF8 {
     size_t length;
     uint8_t* buffer;
@@ -30,8 +48,29 @@ typedef struct DataBuffer {
     double* data;
 } DataBuffer;
 
+typedef struct OptionalString {
+    bool valid;
+    StringUTF8 string;
+} OptionalString;
+
+typedef struct Parameter {
+    int64_t bit_length;
+    StringUTF8 short_name;
+} Parameter;
+
+typedef struct FCSMetadata {
+    enum FCSMode mode;
+    enum Datatype datatype;
+    enum ByteOrder byte_order;
+    uint64_t n_parameters;
+    Parameter* parameters;
+//    Parameters parameters;
+//    uint64_t n_events;
+} FCSMetadata;
+
 typedef struct FCSFile {
     StringUTF8 name;
+    FCSMetadata metadata;
     DataBuffer uncompensated;
     DataBuffer compensated;
 } FCSFile;

@@ -5,9 +5,22 @@
 module FCS
     ( readFCS
     , FCS
+    , FCSMode (..)
+    , Datatype (..)
+    , ByteOrder (..)
+    , FCSMetadata
+    , Parameter
     , compensated
     , uncompensated
     , dataSegment
+    , metadata
+    , mode
+    , datatype
+    , byteOrder
+    , nParameters
+    , parameters
+    , bitLength
+    , shortName
     ) where
 
 import Control.Monad (replicateM, liftM2, liftM3)
@@ -469,17 +482,17 @@ getData :: FCSMetadata -> Get DataSegment
 getData meta = do
     unprocessedList <- getRawData meta
     unprocessed <- A.resizeM (A.Sz (nE :. nP)) . A.fromList A.Seq $ unprocessedList
-    traceM ("Size of unprocessed: " ++ show (A.size unprocessed))
+    --traceM ("Size of unprocessed: " ++ show (A.size unprocessed))
     let cols = A.innerSlices unprocessed
     let mapped = A.imap (\i col -> let param = parameters meta !! i
                                    in A.map (getCalibrationTransform param . gainLogTransform param) col) cols
     processed <- A.computeAs A.S <$> A.stackInnerSlicesM mapped
-    traceM ("Size of processed: " ++ show (A.size processed))
+    --traceM ("Size of processed: " ++ show (A.size processed))
     compensated <- \case
                       Just spill -> compensateData (parameters meta) spill processed
                       Nothing -> return processed
                     $ spillover meta
-    traceM ("Size of compensated: " ++ show (A.size compensated))
+    --traceM ("Size of compensated: " ++ show (A.size compensated))
     return $! DataSegment unprocessed processed compensated
     where nP = fromIntegral $ nParameters meta
           nE = fromIntegral $ nEvents meta

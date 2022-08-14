@@ -1,7 +1,8 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE FlexibleInstances #-}
 module FCS.FFI 
-    ( loadFCS
+    ( loadFCS,
+      freeFCS
     ) where
 
 import qualified Data.ByteString.Lazy as BL
@@ -29,8 +30,33 @@ loadFCS fname = do
     poke pFcs fcs
     return pFcs
 
+foreign export ccall freeFCS :: Ptr FCS -> IO Int
+freeFCS pFcs = return 0
+
 -- Export list
 #include <fcs.h>
+
+
+-----------Helper functions-----------------------------------
+fcsModeToEnum :: FCSMode -> Int
+fcsModeToEnum m
+    | m == List                     = #{const mode_List}
+    | m == MultivariateHistogram    = #{const mode_MultivariateHistogram}
+    | m == UnivariateHistograms     = #{const mode_UnivariateHistograms}
+
+datatypeToEnum :: Datatype -> Int
+datatypeToEnum d
+    | d == StoredInteger = #{const type_StoredInteger}
+    | d == StoredFloat   = #{const type_StoredFloat}
+    | d == StoredDouble  = #{const type_StoredDouble}
+    | d == StoredASCII   = #{const type_StoredASCII}
+
+byteOrderToEnum :: ByteOrder -> Int
+byteOrderToEnum bo
+    | bo == LittleEndian    = #{const LittleEndian}
+    | bo == BigEndian       = #{const BigEndian}
+
+-----------STRUCT DEFINITIONS-----------------------------------------
 instance Storable T.Text where
     sizeOf _ = #{size StringUTF8}
     alignment _ = #{alignment StringUTF8}
@@ -40,6 +66,17 @@ instance Storable T.Text where
         #{poke StringUTF8, length} ptr $ length bytes
         #{poke StringUTF8, buffer} ptr $ byteArray
 --    peek ptr = do return T.empty
+
+instance Storable (Maybe T.Text) where
+    sizeOf _ = #{size OptionalString}
+    alignment _ = #{alignment OptionalString}
+    poke ptr t = case t of
+        Nothing -> do
+            #{poke OptionalString, valid}  ptr $ False
+        Just text -> do
+            #{poke OptionalString, valid}  ptr $ True
+            #{poke OptionalString, string} ptr $ text
+--  peek ptr
 
 instance Storable (Matrix.Matrix Double) where
     sizeOf _ = #{size DataBuffer}
@@ -62,10 +99,30 @@ instance Storable (A.Matrix A.S Double) where
         unsafeWith (A.toStorableVector m) (\mptr -> #{poke DataBuffer, data} ptr mptr)
 --  peek ptr
 
+instance Storable Parameter where
+    sizeOf _ = #{size Parameter}
+    alignment _ = #{alignment Parameter}
+    poke ptr p = do
+        #{poke Parameter, bit_length}   ptr $ bitLength p
+        #{poke Parameter, short_name}   ptr $ shortName p
+
+instance Storable FCSMetadata where
+    sizeOf _ = #{size FCSMetadata}
+    alignment _ = #{alignment FCSMetadata}
+    poke ptr m = do
+        paramArray <- newArray $ parameters m
+        #{poke FCSMetadata, mode} ptr $ fcsModeToEnum $ mode m
+        #{poke FCSMetadata, datatype} ptr $ datatypeToEnum $ datatype m
+        #{poke FCSMetadata, byte_order} ptr $ byteOrderToEnum $ byteOrder m
+        #{poke FCSMetadata, n_parameters} ptr $ nParameters m
+        #{poke FCSMetadata, parameters} ptr $ paramArray
+--  peek ptr
+
 instance Storable FCS where
     sizeOf _ = #{size FCSFile}
     alignment _ = #{alignment FCSFile}
     poke ptr f = do
         #{poke FCSFile, name}          ptr $ T.pack "Test"
+        #{poke FCSFile, metadata}      ptr $ metadata f
         #{poke FCSFile, uncompensated} ptr $ uncompensated $ dataSegment f
         #{poke FCSFile, compensated}   ptr $ compensated $ dataSegment f
