@@ -9,6 +9,7 @@ import qualified Data.ByteString as B
 import qualified Data.Text as T
 import qualified Data.Text.Encoding
 import qualified Data.Matrix as Matrix
+import qualified Data.Massiv.Array as A
 import Data.Binary.Get (runGet)
 
 import Foreign.C.String
@@ -47,6 +48,14 @@ instance Storable (Matrix.Matrix Double) where
         #{poke DataBuffer, n_events}     ptr $ Matrix.nrows m
         #{poke DataBuffer, n_parameters} ptr $ Matrix.ncols m
         #{poke DataBuffer, data}         ptr $ byteArray
+--  peek ptr
+
+instance Storable (A.Matrix A.S Double) where
+    sizeOf _ = #{size DataBuffer}
+    alignment _ = #{alignment DataBuffer}
+    poke ptr m = do
+        #{poke DataBuffer, n_events}     ptr $ (A.unSz . fst $ A.unconsSz $ A.size m)
+        #{poke DataBuffer, n_parameters} ptr $ (A.unSz . snd $ A.unconsSz $ A.size m)
 --  peek ptr
 
 instance Storable FCS where

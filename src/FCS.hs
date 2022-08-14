@@ -28,7 +28,7 @@ import qualified Data.Massiv.Array as A
 import qualified Data.Massiv.Core as MC
 import Data.Massiv.Core.Index (Dimension (Dim1, Dim2), getDimension, unSz, Ix2 ((:.)))
 import Data.Char (isAscii)
---import Debug.Trace ( trace )
+import Debug.Trace ( trace, traceM )
 
 import qualified FCS.Shim as Shim
 import GHC.Float (float2Double)
@@ -417,8 +417,8 @@ data DataSegment = DataSegment
     , compensated :: SMatrixDouble
     }
 instance Show DataSegment where
-    show x = "{num_parameters: " ++ show (getDimension (unSz $ A.size $ unprocessed x) Dim1)
-           ++", num_events: " ++ show (getDimension (unSz $ A.size $ unprocessed x) Dim2) ++ "}"
+    show x = "{num_parameters: " ++ show (getDimension (unSz $ A.size $ uncompensated x) Dim1)
+           ++", num_events: " ++ show (getDimension (unSz $ A.size $ uncompensated x) Dim2) ++ "}"
 
 getRawData :: FCSMetadata -> Get [Double]
 getRawData meta
@@ -449,7 +449,7 @@ getCalibrationTransform param = \case
 
 
 applyCompensationSlice :: (Int, A.Array A.D A.Ix1 Double) -> A.Array A.DL A.Ix2 Double -> Get (A.Array A.DL A.Ix2 Double)
-applyCompensationSlice slice x = uncurry (A.replaceSlice 2) slice (A.computeAs A.B x)
+applyCompensationSlice slice x = uncurry (A.replaceSlice 1) slice (A.computeAs A.B x)
 
 compensateData :: [Parameter] -> Spillover -> A.Matrix A.S Double -> Get SMatrixDouble
 compensateData params spill uncomp = do
@@ -468,15 +468,18 @@ compensateData params spill uncomp = do
 getData :: FCSMetadata -> Get DataSegment
 getData meta = do
     unprocessedList <- getRawData meta
-    unprocessed <- A.resizeM (A.Sz (nP :. nE)) . A.fromList A.Seq $ unprocessedList
+    unprocessed <- A.resizeM (A.Sz (nE :. nP)) . A.fromList A.Seq $ unprocessedList
+    traceM ("Size of unprocessed: " ++ show (A.size unprocessed))
     let cols = A.innerSlices unprocessed
     let mapped = A.imap (\i col -> let param = parameters meta !! i
                                    in A.map (getCalibrationTransform param . gainLogTransform param) col) cols
     processed <- A.computeAs A.S <$> A.stackInnerSlicesM mapped
+    traceM ("Size of processed: " ++ show (A.size processed))
     compensated <- \case
                       Just spill -> compensateData (parameters meta) spill processed
                       Nothing -> return processed
                     $ spillover meta
+    traceM ("Size of compensated: " ++ show (A.size compensated))
     return $! DataSegment unprocessed processed compensated
     where nP = fromIntegral $ nParameters meta
           nE = fromIntegral $ nEvents meta
