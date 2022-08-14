@@ -11,6 +11,7 @@ import qualified Data.Text.Encoding
 import qualified Data.Matrix as Matrix
 import qualified Data.Massiv.Array as A
 import Data.Binary.Get (runGet)
+import Data.Vector.Storable (unsafeWith)
 
 import Foreign.C.String
 import Foreign.Storable
@@ -56,6 +57,9 @@ instance Storable (A.Matrix A.S Double) where
     poke ptr m = do
         #{poke DataBuffer, n_events}     ptr $ (A.unSz . fst $ A.unconsSz $ A.size m)
         #{poke DataBuffer, n_parameters} ptr $ (A.unSz . snd $ A.unconsSz $ A.size m)
+        -- #{poke ...} has type signature
+        -- Ptr a -> Storable b -> IO()
+        unsafeWith (A.toStorableVector m) (\mptr -> #{poke DataBuffer, data} ptr mptr)
 --  peek ptr
 
 instance Storable FCS where

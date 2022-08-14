@@ -31,7 +31,8 @@ foreign-library libfcs
                     text,
                     time,
                     massiv >= 1.0.1.1,
-                    matrix
+                    matrix,
+                    vector
   hs-source-dirs:   src
   include-dirs:     csrc
   c-sources:        csrc/fcs.c
@@ -53,7 +54,8 @@ library
                        text,
                        time,
                        massiv >= 1.0.1.1,
-                       matrix
+                       matrix,
+                       vector
   include-dirs:     csrc
   default-language:    Haskell2010
 

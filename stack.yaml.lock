@@ -3,11 +3,25 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/lock_files
 
-packages: []
+packages:
+- completed:
+    hackage: massiv-1.0.1.1@sha256:b3bbea8a7e8096965dea89a3c72c7f1b7bc8ae71314ffe2777ab26074c095e61,5071
+    pantry-tree:
+      size: 3992
+      sha256: 8e5ff7157086692700d5f3bec9ab078eb9c4271e4510cf0f72db60d0f149a8d2
+  original:
+    hackage: massiv-1.0.1.1@sha256:b3bbea8a7e8096965dea89a3c72c7f1b7bc8ae71314ffe2777ab26074c095e61,5071
+- completed:
+    hackage: scheduler-2.0.0.1@sha256:3e36c5a50536d20f03320defd64e3d3adb6309b471ae048efda7df9d54361308,2556
+    pantry-tree:
+      size: 922
+      sha256: ea28f2ff7a4b31088bc3f3b299e1f425916b1cc369735846d69c4a22bcbab743
+  original:
+    hackage: scheduler-2.0.0.1@sha256:3e36c5a50536d20f03320defd64e3d3adb6309b471ae048efda7df9d54361308,2556
 snapshots:
 - completed:
-    size: 619164
-    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/19/18.yaml
-    sha256: 65b9809265860e085b4f61d4eb00d5d73e41190693620385a69cc9d9df7a901d
+    size: 590100
+    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/18/28.yaml
+    sha256: 428ec8d5ce932190d3cbe266b9eb3c175cd81e984babf876b64019e2cbe4ea68
   original:
-    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/19/18.yaml
+    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/18/28.yaml

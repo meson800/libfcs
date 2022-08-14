@@ -18,7 +18,7 @@
 # resolver: ./custom-snapshot.yaml
 # resolver: https://example.com/snapshots/2018-01-01.yaml
 resolver:
-  url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/19/18.yaml
+  url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/18/28.yaml
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -35,7 +35,11 @@ packages:
 # These entries can reference officially published versions as well as
 # forks / in-progress versions pinned to a git hash. For example:
 #
-# extra-deps:
+extra-deps:
+  # Use these extra deps until library building is fixed on GHC > 9.2.3 through Stack
+  # https://gitlab.haskell.org/ghc/ghc/-/issues/20520
+  - massiv-1.0.1.1@sha256:b3bbea8a7e8096965dea89a3c72c7f1b7bc8ae71314ffe2777ab26074c095e61,5071
+  - scheduler-2.0.0.1@sha256:3e36c5a50536d20f03320defd64e3d3adb6309b471ae048efda7df9d54361308,2556
 # - acme-missiles-0.3
 # - git: https://github.com/commercialhaskell/stack.git
 #   commit: e7b331f14bcffb8367cd58fbfc8b40ec7642100a
