@@ -15,40 +15,37 @@ extra-source-files:
   CHANGELOG.md
 cabal-version:       >=1.10
 
---foreign-library libfcs
---  type: native-shared
---
---  if os(Windows)
---    options:      standalone
---    mod-def-file: libfcs.def
---  
---  other-modules:    FCS, FCS.Shim, FCS.FFI
---  build-depends:    base >= 4.7 && < 5,
---                    ascii,
---                    bytestring,
---                    binary,
---                    containers,
---                    text,
---                    time,
---                    massiv >= 1.0.1.1,
---                    matrix,
---                    vector
---  hs-source-dirs:   src
---  include-dirs:     csrc
---  c-sources:        csrc/fcs.c
---  install-includes: fcs.h
---  ghc-options:      -fPIC
---  cc-options:       -DLIBFCS_EXPORTS
---  default-language: Haskell2010
+foreign-library libfcs
+  type: native-shared
 
-library
-  hs-source-dirs:      src
-  exposed-modules:     FCS, FCS.Shim, FCS.FFI
+  if os(Windows)
+    options:      standalone
+    mod-def-file: libfcs.def
+    extra-bundled-libraries: libfcs/libfcs.dll.a
+  
+  other-modules:    FCS, FCS.Shim, FCS.FFI
+  build-depends:    base >= 4.7 && < 5,
+                    ascii,
+                    bytestring,
+                    binary,
+                    containers,
+                    text,
+                    time,
+                    massiv >= 1.0.1.1,
+                    matrix,
+                    vector
+  hs-source-dirs:   src
   include-dirs:     csrc
   c-sources:        csrc/fcs.c
   install-includes: fcs.h
+  ghc-options:      -fPIC
   cc-options:       -DLIBFCS_EXPORTS
-  ghc-options: -Wall -Wcompat
+  default-language: Haskell2010
+
+library
+  hs-source-dirs:      src
+  exposed-modules:     FCS, FCS.Shim
+  ghc-options:      -Wall -Wcompat
   build-depends:       base >= 4.7 && < 5,
                        ascii,
                        bytestring,
@@ -60,7 +57,6 @@ library
                        massiv >= 1.0.1.1,
                        matrix,
                        vector
-  include-dirs:     csrc
   default-language:    Haskell2010
 
 source-repository head
