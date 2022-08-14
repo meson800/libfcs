@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+/********* Helper Enums *********/
 enum FCSMode {
     mode_List,
     mode_MultivariateHistogram,
@@ -37,6 +38,13 @@ enum ByteOrder {
     BigEndian
 };
 
+enum VizScale {
+    viz_Linear,
+    viz_Logarithmic
+};
+
+
+/************ Helper structs ***********/
 typedef struct StringUTF8 {
     size_t length;
     uint8_t* buffer;
@@ -49,13 +57,58 @@ typedef struct DataBuffer {
 } DataBuffer;
 
 typedef struct OptionalString {
-    bool valid;
     StringUTF8 string;
+    bool present;
 } OptionalString;
+
+typedef struct OptionalFloat {
+    float value;
+    bool present;
+} OptionalFloat;
+
+typedef struct OptionalInt64 {
+    int64_t value;
+    bool present;
+} OptionalInt64;
+
+typedef struct AmplificationType {
+    float log_decades;
+    float offset;
+} AmplificationType;
+
+typedef struct OptionalVizScale {
+    enum VizScale viz_scale;
+    float f1;
+    float f2;
+    bool present;
+} OptionalVizScale;
+
+typedef struct OptionalInt64Array {
+    int64_t* vals;
+    bool present;
+} OptionalInt64Array;
+
+typedef struct OptionalParamCalibration {
+    float unit_conversion_factor;
+    StringUTF8 unit_name;
+    bool present;
+} OptionalParamCalibration;
 
 typedef struct Parameter {
     int64_t bit_length;
+    AmplificationType amplification;
     StringUTF8 short_name;
+    int64_t range;
+    OptionalVizScale viz_scale;
+    OptionalString filter;
+    OptionalFloat gain;
+    OptionalInt64Array excitation_wavelengths;
+    OptionalInt64 excitation_power;
+    OptionalFloat percent_light_collected;
+    OptionalString name;
+    OptionalString detector_type;
+    OptionalFloat detector_voltage;
+    OptionalParamCalibration calibration;
 } Parameter;
 
 typedef struct FCSMetadata {

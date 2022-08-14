@@ -8,8 +8,12 @@ module FCS
     , FCSMode (..)
     , Datatype (..)
     , ByteOrder (..)
+    , VisualizationScale (..)
+    , ParameterVisualizationScale
     , FCSMetadata
     , Parameter
+    , AmplificationType
+    , ParameterCalibration
     , compensated
     , uncompensated
     , dataSegment
@@ -21,6 +25,25 @@ module FCS
     , parameters
     , bitLength
     , shortName
+    , range
+    , amplification
+    , logDecades
+    , offset
+    , vizScale
+    , scale
+    , f1
+    , f2
+    , FCS.filter
+    , gain
+    , excitationWavelength
+    , excitationPower
+    , percentLightCollected
+    , name
+    , detectorType
+    , detectorVoltage
+    , unitConversionFactor
+    , unitName
+    , calibration
     ) where
 
 import Control.Monad (replicateM, liftM2, liftM3)
@@ -175,7 +198,7 @@ data AmplificationType = AmplificationType
     , offset :: Float
     } deriving (Show)
 
-data VisualizationScale = Linear | Logarithmic deriving (Enum, Show)
+data VisualizationScale = Linear | Logarithmic deriving (Enum, Show, Eq)
 toVizScale :: T.Text -> Get VisualizationScale
 toVizScale text
     | text == T.pack "Linear" = return Linear

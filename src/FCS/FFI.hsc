@@ -5,6 +5,7 @@ module FCS.FFI
       freeFCS
     ) where
 
+import Data.Int ( Int32, Int64 )
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString as B
 import qualified Data.Text as T
@@ -56,6 +57,11 @@ byteOrderToEnum bo
     | bo == LittleEndian    = #{const LittleEndian}
     | bo == BigEndian       = #{const BigEndian}
 
+vizScaleToEnum :: VisualizationScale -> Int
+vizScaleToEnum v
+    | v == Linear       = #{const viz_Linear}
+    | v == Logarithmic  = #{const viz_Logarithmic}
+
 -----------STRUCT DEFINITIONS-----------------------------------------
 instance Storable T.Text where
     sizeOf _ = #{size StringUTF8}
@@ -72,11 +78,32 @@ instance Storable (Maybe T.Text) where
     alignment _ = #{alignment OptionalString}
     poke ptr t = case t of
         Nothing -> do
-            #{poke OptionalString, valid}  ptr $ False
+            #{poke OptionalString, present} ptr $ False
         Just text -> do
-            #{poke OptionalString, valid}  ptr $ True
-            #{poke OptionalString, string} ptr $ text
+            #{poke OptionalString, present} ptr $ True
+            #{poke OptionalString, string}  ptr $ text
 --  peek ptr
+
+instance Storable (Maybe Float) where
+    sizeOf _ = #{size OptionalFloat}
+    alignment _ = #{alignment OptionalFloat}
+    poke ptr f= case f of
+        Nothing -> do
+            #{poke OptionalFloat, present} ptr $ False
+        Just f' -> do
+            #{poke OptionalFloat, present} ptr $ True
+            #{poke OptionalFloat, value}   ptr $ f'
+--  peek ptr
+
+instance Storable (Maybe Int64) where
+    sizeOf _ = #{size OptionalInt64}
+    alignment _ = #{alignment OptionalInt64}
+    poke ptr i = case i of
+        Nothing -> do
+            #{poke OptionalInt64, present} ptr $ False
+        Just i' -> do
+            #{poke OptionalInt64, present} ptr $ True
+            #{poke OptionalInt64, value}   ptr $ i'
 
 instance Storable (Matrix.Matrix Double) where
     sizeOf _ = #{size DataBuffer}
@@ -99,12 +126,66 @@ instance Storable (A.Matrix A.S Double) where
         unsafeWith (A.toStorableVector m) (\mptr -> #{poke DataBuffer, data} ptr mptr)
 --  peek ptr
 
+instance Storable AmplificationType where
+    sizeOf _ = #{size AmplificationType}
+    alignment _ = #{alignment AmplificationType}
+    poke ptr at = do
+        #{poke AmplificationType, log_decades}   ptr $ logDecades at
+        #{poke AmplificationType, offset}        ptr $ offset at
+
+instance Storable (Maybe ParameterVisualizationScale) where
+    sizeOf _ = #{size OptionalVizScale}
+    alignment _ = #{alignment OptionalVizScale}
+    poke ptr s = case s of
+        Nothing -> do
+            #{poke OptionalVizScale, present}   ptr $ False
+        Just s' -> do
+            #{poke OptionalVizScale, present}   ptr $ True
+            #{poke OptionalVizScale, viz_scale} ptr $ vizScaleToEnum $ scale s'
+            #{poke OptionalVizScale, f1}        ptr $ f1 s'
+            #{poke OptionalVizScale, f2}        ptr $ f2 s'
+
+instance Storable (Maybe [Int64]) where
+    sizeOf _ = #{size OptionalInt64Array}
+    alignment _ = #{alignment OptionalInt64Array}
+    poke ptr x = case x of
+        Nothing -> do
+            #{poke OptionalInt64Array, present} ptr $ False
+        Just ints -> do
+            intArray <- newArray $ ints
+            #{poke OptionalInt64Array, present} ptr $ True
+            #{poke OptionalInt64Array, vals}    ptr $ intArray
+
+instance Storable (Maybe ParameterCalibration) where
+    sizeOf _ = #{size OptionalParamCalibration}
+    alignment _ = #{alignment OptionalParamCalibration}
+    poke ptr c = case c of
+        Nothing -> do
+            #{poke OptionalParamCalibration, present}   ptr $ False
+        Just c' -> do
+            #{poke OptionalParamCalibration, present}   ptr $ True
+            #{poke OptionalParamCalibration, unit_conversion_factor} ptr $ unitConversionFactor c'
+            #{poke OptionalParamCalibration, unit_name}        ptr $ unitName c'
+
 instance Storable Parameter where
     sizeOf _ = #{size Parameter}
     alignment _ = #{alignment Parameter}
     poke ptr p = do
-        #{poke Parameter, bit_length}   ptr $ bitLength p
-        #{poke Parameter, short_name}   ptr $ shortName p
+        #{poke Parameter, bit_length}               ptr $ bitLength p
+        #{poke Parameter, amplification}            ptr $ amplification p
+        #{poke Parameter, short_name}               ptr $ shortName p
+        #{poke Parameter, range}                    ptr $ range p
+        #{poke Parameter, viz_scale}                ptr $ vizScale p
+        #{poke Parameter, filter}                   ptr $ FCS.filter p
+        #{poke Parameter, gain}                     ptr $ gain p
+        #{poke Parameter, excitation_wavelengths}   ptr $ excitationWavelength p
+        #{poke Parameter, excitation_power}         ptr $ excitationPower p
+        #{poke Parameter, percent_light_collected}  ptr $ percentLightCollected p
+        #{poke Parameter, name}                     ptr $ name p
+        #{poke Parameter, detector_type}            ptr $ detectorType p
+        #{poke Parameter, detector_voltage}         ptr $ detectorVoltage p
+        #{poke Parameter, calibration}              ptr $ calibration p
+
 
 instance Storable FCSMetadata where
     sizeOf _ = #{size FCSMetadata}
