@@ -44,6 +44,32 @@ module FCS
     , unitConversionFactor
     , unitName
     , calibration
+    , nEventsAborted
+    , acquireTime
+    , acquireEndTime
+    , acquireDate
+    , cells
+    , comment
+    , cytometerType
+    , cytometerSerialNumber
+    , institution
+    , experimenter
+    , operator
+    , filename
+    , lastModified
+    , lastModifier
+    , nEventsLost
+    , originality
+    , plateID
+    , plateName
+    , project
+    , specimen
+    , spillover
+    , specimenSource
+    , computer
+    , timestep
+    , trigger
+    , wellID
     ) where
 
 import Control.Monad (replicateM, liftM2, liftM3)
@@ -357,9 +383,9 @@ data FCSMetadata = FCSMetadata
     , extraKeyvals :: Map.Map T.Text T.Text
     -- Optional parameters
     , nEventsAborted :: Maybe Int64 -- ABRT
-    , acquireTime :: Maybe Time.LocalTime -- BTIM
+    , acquireTime :: Maybe Time.TimeOfDay -- BTIM
     , acquireDate :: Maybe Time.Day -- DATE
-    , acquireEndTime :: Maybe Time.LocalTime -- ETIM
+    , acquireEndTime :: Maybe Time.TimeOfDay -- ETIM
     , cellSubset :: Maybe CellSubset -- CSMODE, CSTOT, CSVBITS, CSVnFLAG
     , cells :: Maybe T.Text -- CELLS
     , comment :: Maybe T.Text -- COM
@@ -374,7 +400,7 @@ data FCSMetadata = FCSMetadata
 -- PKNn
 -- RnI
 -- RnW
-    , lastModified :: Maybe Time.LocalTime -- LAST_MODIFIED
+    , lastModified :: Maybe Time.TimeOfDay -- LAST_MODIFIED
     , lastModifier :: Maybe T.Text -- LAST_MODIFIER
     , nEventsLost :: Maybe Int64 -- LOST
     , originality :: Maybe Originality -- ORIGINALITY

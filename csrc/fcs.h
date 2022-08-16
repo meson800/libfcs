@@ -117,8 +117,35 @@ typedef struct FCSMetadata {
     enum ByteOrder byte_order;
     uint64_t n_parameters;
     Parameter* parameters;
-//    Parameters parameters;
-//    uint64_t n_events;
+// TODO: extraKeyvals
+    OptionalInt64 n_events_aborted;
+    OptionalString acquire_time;
+    OptionalString acquire_end_time;
+    OptionalString acquire_date;
+// TODO: optional CellSubset
+    OptionalString cells;
+    OptionalString comment;
+    OptionalString cytometer_type;
+    OptionalString cytometer_serial_number;
+    OptionalString institution;
+    OptionalString experimenter;
+    OptionalString operator;
+    OptionalString filename;
+// TODO: GATE info, PKn PKNn, RnI, RnW
+    OptionalString last_modified;
+    OptionalString last_modifier;
+    OptionalInt64 n_events_lost;
+// TODO: originality
+    OptionalString plate_id;
+    OptionalString plate_name;
+    OptionalString project;
+    OptionalString specimen;
+// TODO: spillover
+    OptionalString specimen_source;
+    OptionalString computer;
+    OptionalFloat timestep;
+// TODO: trigger
+    OptionalString well_id;
 } FCSMetadata;
 
 typedef struct FCSFile {

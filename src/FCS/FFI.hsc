@@ -14,14 +14,18 @@ import qualified Data.Matrix as Matrix
 import qualified Data.Massiv.Array as A
 import Data.Binary.Get (runGet)
 import Data.Vector.Storable (unsafeWith)
+import Data.Word (Word8)
+import Data.Time.Format.ISO8601 (iso8601Show)
 
 import Foreign.C.String
 import Foreign.Storable
 import Foreign.Ptr
-import Foreign.Marshal.Alloc (malloc)
+import Foreign.Marshal.Alloc (malloc, free)
 import Foreign.Marshal.Array (newArray)
 
 import FCS
+
+#include <fcs.h>
 
 foreign export ccall loadFCS :: CString -> IO (Ptr FCS)
 loadFCS fname = do
@@ -31,11 +35,20 @@ loadFCS fname = do
     poke pFcs fcs
     return pFcs
 
-foreign export ccall freeFCS :: Ptr FCS -> IO Int
-freeFCS pFcs = return 0
 
--- Export list
-#include <fcs.h>
+foreign export ccall freeFCS :: Ptr FCS -> IO Int
+freeFCS pFcs = do
+    -- Example of how to free all of the various pointers stuffed inside here
+    -- Free key float databuffers
+    uncompPtr <- #{peek FCSFile, uncompensated.data} pFcs :: IO (Ptr Word8)
+    free uncompPtr
+    compPtr <- #{peek FCSFile, compensated.data} pFcs :: IO (Ptr Word8)
+    free compPtr
+    -- TODO: free other optionals
+    -- TODO: free parameters
+    -- Free overall datastructure
+    free pFcs
+    return 0
 
 
 -----------Helper functions-----------------------------------
@@ -123,7 +136,8 @@ instance Storable (A.Matrix A.S Double) where
         #{poke DataBuffer, n_parameters} ptr $ (A.unSz . snd $ A.unconsSz $ A.size m)
         -- #{poke ...} has type signature
         -- Ptr a -> Storable b -> IO()
-        unsafeWith (A.toStorableVector m) (\mptr -> #{poke DataBuffer, data} ptr mptr)
+        byteArray <- newArray $ A.toList m
+        #{poke DataBuffer, data} ptr $ byteArray
 --  peek ptr
 
 instance Storable AmplificationType where
@@ -197,6 +211,31 @@ instance Storable FCSMetadata where
         #{poke FCSMetadata, byte_order} ptr $ byteOrderToEnum $ byteOrder m
         #{poke FCSMetadata, n_parameters} ptr $ nParameters m
         #{poke FCSMetadata, parameters} ptr $ paramArray
+        -- TODO: extraKeyvals
+        #{poke FCSMetadata, n_events_aborted} ptr $ nEventsAborted m
+        #{poke FCSMetadata, acquire_time} ptr $ T.pack <$> iso8601Show <$> acquireTime m
+        #{poke FCSMetadata, acquire_end_time} ptr $ T.pack <$> iso8601Show <$> acquireEndTime m
+        #{poke FCSMetadata, acquire_date} ptr $ T.pack <$> iso8601Show <$> acquireDate m
+        #{poke FCSMetadata, cells} ptr $ cells m
+        #{poke FCSMetadata, comment} ptr $ comment m
+        #{poke FCSMetadata, cytometer_type} ptr $ cytometerType m
+        #{poke FCSMetadata, cytometer_serial_number} ptr $ cytometerSerialNumber m
+        #{poke FCSMetadata, institution} ptr $ institution m
+        #{poke FCSMetadata, experimenter} ptr $ experimenter m
+        #{poke FCSMetadata, operator} ptr $ operator m
+        #{poke FCSMetadata, filename} ptr $ filename m
+        #{poke FCSMetadata, last_modified} ptr $ T.pack <$> iso8601Show <$> lastModified m
+        #{poke FCSMetadata, last_modifier} ptr $ lastModifier m
+        #{poke FCSMetadata, n_events_lost} ptr $ nEventsLost m
+        #{poke FCSMetadata, plate_id} ptr $ plateID m
+        #{poke FCSMetadata, plate_name} ptr $ plateName m
+        #{poke FCSMetadata, project} ptr $ project m
+        #{poke FCSMetadata, specimen} ptr $ specimen m
+        #{poke FCSMetadata, specimen_source} ptr $ specimenSource m
+        #{poke FCSMetadata, computer} ptr $ computer m
+        #{poke FCSMetadata, timestep} ptr $ timestep m
+        #{poke FCSMetadata, well_id} ptr $ wellID m
+        -- TODO
 --  peek ptr
 
 instance Storable FCS where
