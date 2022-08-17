@@ -9,11 +9,14 @@ module FCS
     , Datatype (..)
     , ByteOrder (..)
     , VisualizationScale (..)
+    , Originality (..)
     , ParameterVisualizationScale
     , FCSMetadata
     , Parameter
     , AmplificationType
     , ParameterCalibration
+    , Spillover
+    , Trigger
     , compensated
     , uncompensated
     , dataSegment
@@ -70,6 +73,11 @@ module FCS
     , timestep
     , trigger
     , wellID
+    , nParams
+    , parameterNames
+    , spilloverMatrix
+    , triggerChannel
+    , triggerValue
     ) where
 
 import Control.Monad (replicateM, liftM2, liftM3)
@@ -321,7 +329,7 @@ toByteOrder text
     | text == T.pack "4,3,2,1" = return BigEndian
     | otherwise = fail "Unable to parse byte order"
 
-data Originality = Original | NonDataModified | Appended | DataModified deriving (Enum, Show)
+data Originality = Original | NonDataModified | Appended | DataModified deriving (Enum, Show, Eq)
 toOriginality :: T.Text -> Get Originality
 toOriginality text
     | text == T.pack "Original" = return Original
@@ -357,7 +365,7 @@ maybeCellSubset keyvals = case Map.lookup (T.pack "$CSMODE") keyvals of
 data Spillover = Spillover
     { nParams :: Int64
     , parameterNames :: [T.Text]
-    , spilloverMatrix :: SMatrixFloat
+    , spilloverMatrix :: SMatrixDouble
     } deriving (Show)
 
 getSpillover :: T.Text -> Get Spillover
@@ -518,7 +526,7 @@ compensateData params spill uncomp = do
     -- Extract the indicies of the parameters needing compensation
     paramIndicies <- maybeGet "Invalid parameter name in spillover matrix" $ mapM (`elemIndex` map shortName params) (parameterNames spill)
     -- Invert the spillover matrix to get a compensation matrix. Make it manifest
-    compMatrix <- A.computeAs A.B <$> fmap (A.map float2Double) (massivInvert $ spilloverMatrix spill)
+    compMatrix <- A.computeAs A.B <$> massivInvert (spilloverMatrix spill)
     -- Extract column vectors from uncompensated data
     precompSlices <- mapM (uncomp <!?) paramIndicies
     -- Re-stack column vectors into a matrix and make it manifest for matrix multiplication
@@ -656,7 +664,7 @@ mapEveryCol :: (Int -> a -> a) -> DM.Matrix a -> DM.Matrix a
 mapEveryCol mapF initial = foldl (flip ($)) initial [DM.mapCol (\_ x -> mapF i x) i | i <- [1..DM.ncols initial]]
 
 
-massivInvert :: A.Matrix A.S Float -> Get(A.Matrix A.P Float)
+massivInvert :: A.Matrix A.S Double -> Get(A.Matrix A.P Double)
 massivInvert x = do
     let sz = A.size x
     let ix = unSz sz

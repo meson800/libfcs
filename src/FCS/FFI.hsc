@@ -21,7 +21,7 @@ import Foreign.C.String
 import Foreign.Storable
 import Foreign.Ptr
 import Foreign.Marshal.Alloc (malloc, free)
-import Foreign.Marshal.Array (newArray)
+import Foreign.Marshal.Array (newArray, mallocArray, copyArray)
 
 import FCS
 
@@ -52,28 +52,35 @@ freeFCS pFcs = do
 
 
 -----------Helper functions-----------------------------------
-fcsModeToEnum :: FCSMode -> Int
+fcsModeToEnum :: FCSMode -> Int64
 fcsModeToEnum m
     | m == List                     = #{const mode_List}
     | m == MultivariateHistogram    = #{const mode_MultivariateHistogram}
     | m == UnivariateHistograms     = #{const mode_UnivariateHistograms}
 
-datatypeToEnum :: Datatype -> Int
+datatypeToEnum :: Datatype -> Int64
 datatypeToEnum d
     | d == StoredInteger = #{const type_StoredInteger}
     | d == StoredFloat   = #{const type_StoredFloat}
     | d == StoredDouble  = #{const type_StoredDouble}
     | d == StoredASCII   = #{const type_StoredASCII}
 
-byteOrderToEnum :: ByteOrder -> Int
+byteOrderToEnum :: ByteOrder -> Int64
 byteOrderToEnum bo
     | bo == LittleEndian    = #{const LittleEndian}
     | bo == BigEndian       = #{const BigEndian}
 
-vizScaleToEnum :: VisualizationScale -> Int
+vizScaleToEnum :: VisualizationScale -> Int64
 vizScaleToEnum v
     | v == Linear       = #{const viz_Linear}
     | v == Logarithmic  = #{const viz_Logarithmic}
+
+originalityToEnum :: Originality -> Int64
+originalityToEnum o
+    | o == Original         = #{const orig_Original}
+    | o == NonDataModified  = #{const orig_NonDataModified}
+    | o == Appended         = #{const orig_Appended}
+    | o == DataModified     = #{const orig_DataModified}
 
 -----------STRUCT DEFINITIONS-----------------------------------------
 instance Storable T.Text where
@@ -123,8 +130,8 @@ instance Storable (Matrix.Matrix Double) where
     alignment _ = #{alignment DataBuffer}
     poke ptr m = do
         byteArray <- newArray $ Matrix.toList m
-        #{poke DataBuffer, n_events}     ptr $ Matrix.nrows m
-        #{poke DataBuffer, n_parameters} ptr $ Matrix.ncols m
+        #{poke DataBuffer, n_rows}     ptr $ Matrix.nrows m
+        #{poke DataBuffer, n_cols} ptr $ Matrix.ncols m
         #{poke DataBuffer, data}         ptr $ byteArray
 --  peek ptr
 
@@ -132,11 +139,13 @@ instance Storable (A.Matrix A.S Double) where
     sizeOf _ = #{size DataBuffer}
     alignment _ = #{alignment DataBuffer}
     poke ptr m = do
-        #{poke DataBuffer, n_events}     ptr $ (A.unSz . fst $ A.unconsSz $ A.size m)
-        #{poke DataBuffer, n_parameters} ptr $ (A.unSz . snd $ A.unconsSz $ A.size m)
+        #{poke DataBuffer, n_rows}  ptr $ (A.unSz . fst $ A.unconsSz $ A.size m)
+        #{poke DataBuffer, n_cols}  ptr $ (A.unSz . snd $ A.unconsSz $ A.size m)
         -- #{poke ...} has type signature
         -- Ptr a -> Storable b -> IO()
-        byteArray <- newArray $ A.toList m
+        let n_elem = A.elemsCount m
+        byteArray <- mallocArray n_elem :: IO (Ptr Double)
+        unsafeWith (A.toStorableVector m) $ (\ptr -> copyArray byteArray ptr n_elem)
         #{poke DataBuffer, data} ptr $ byteArray
 --  peek ptr
 
@@ -200,6 +209,30 @@ instance Storable Parameter where
         #{poke Parameter, detector_voltage}         ptr $ detectorVoltage p
         #{poke Parameter, calibration}              ptr $ calibration p
 
+instance Storable (Maybe Spillover) where
+    sizeOf _ = #{size OptionalSpillover}
+    alignment _ = #{alignment OptionalSpillover}
+    poke ptr s = case s of
+        Nothing -> do
+            #{poke OptionalSpillover, present} ptr $ False
+        Just s' -> do
+            #{poke OptionalSpillover, present} ptr $ True
+            #{poke OptionalSpillover, n_parameters} ptr $ nParams s'
+            paramNameArray <- newArray $ parameterNames s'
+            #{poke OptionalSpillover, parameters} ptr $ paramNameArray
+            #{poke OptionalSpillover, matrix} ptr $ spilloverMatrix s'
+
+instance Storable (Maybe Trigger) where
+    sizeOf _ = #{size OptionalTrigger}
+    alignment _ = #{alignment OptionalTrigger}
+    poke ptr t = case t of 
+        Nothing -> do
+            #{poke OptionalTrigger, present} ptr $ False
+        Just t' -> do
+            #{poke OptionalTrigger, present} ptr $ True
+            #{poke OptionalTrigger, trigger_channel} ptr $ triggerChannel t'
+            #{poke OptionalTrigger, trigger_value} ptr $ triggerValue t'
+
 
 instance Storable FCSMetadata where
     sizeOf _ = #{size FCSMetadata}
@@ -227,13 +260,16 @@ instance Storable FCSMetadata where
         #{poke FCSMetadata, last_modified} ptr $ T.pack <$> iso8601Show <$> lastModified m
         #{poke FCSMetadata, last_modifier} ptr $ lastModifier m
         #{poke FCSMetadata, n_events_lost} ptr $ nEventsLost m
+        #{poke FCSMetadata, originality} ptr $ originalityToEnum <$> originality m
         #{poke FCSMetadata, plate_id} ptr $ plateID m
         #{poke FCSMetadata, plate_name} ptr $ plateName m
         #{poke FCSMetadata, project} ptr $ project m
         #{poke FCSMetadata, specimen} ptr $ specimen m
+        #{poke FCSMetadata, spillover} ptr $ spillover m
         #{poke FCSMetadata, specimen_source} ptr $ specimenSource m
         #{poke FCSMetadata, computer} ptr $ computer m
         #{poke FCSMetadata, timestep} ptr $ timestep m
+        #{poke FCSMetadata, trigger} ptr $ trigger m
         #{poke FCSMetadata, well_id} ptr $ wellID m
         -- TODO
 --  peek ptr

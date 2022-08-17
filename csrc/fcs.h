@@ -43,6 +43,13 @@ enum VizScale {
     viz_Logarithmic
 };
 
+enum Originality {
+    orig_Original,
+    orig_NonDataModified,
+    orig_Appended,
+    orig_DataModified
+};
+
 
 /************ Helper structs ***********/
 typedef struct StringUTF8 {
@@ -51,8 +58,8 @@ typedef struct StringUTF8 {
 } StringUTF8;
 
 typedef struct DataBuffer {
-    size_t n_events;
-    size_t n_parameters;
+    size_t n_rows;
+    size_t n_cols;
     double* data;
 } DataBuffer;
 
@@ -111,6 +118,19 @@ typedef struct Parameter {
     OptionalParamCalibration calibration;
 } Parameter;
 
+typedef struct OptionalSpillover {
+    int64_t n_parameters;
+    StringUTF8* parameters;
+    DataBuffer* matrix;
+    bool present;
+} OptionalSpillover;
+
+typedef struct OptionalTrigger {
+    StringUTF8 trigger_channel;
+    int64_t trigger_value;
+    bool present;
+} OptionalTrigger;
+
 typedef struct FCSMetadata {
     enum FCSMode mode;
     enum Datatype datatype;
@@ -135,16 +155,16 @@ typedef struct FCSMetadata {
     OptionalString last_modified;
     OptionalString last_modifier;
     OptionalInt64 n_events_lost;
-// TODO: originality
+    OptionalInt64 originality;
     OptionalString plate_id;
     OptionalString plate_name;
     OptionalString project;
     OptionalString specimen;
-// TODO: spillover
+    OptionalSpillover spillover;
     OptionalString specimen_source;
     OptionalString computer;
     OptionalFloat timestep;
-// TODO: trigger
+    OptionalTrigger trigger;
     OptionalString well_id;
 } FCSMetadata;
 
