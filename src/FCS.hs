@@ -78,6 +78,7 @@ module FCS
     , spilloverMatrix
     , triggerChannel
     , triggerValue
+    , extraKeyvals
     ) where
 
 import Control.Monad (replicateM, liftM2, liftM3)

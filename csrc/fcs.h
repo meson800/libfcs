@@ -131,13 +131,23 @@ typedef struct OptionalTrigger {
     bool present;
 } OptionalTrigger;
 
+typedef struct  MapItem {
+    StringUTF8 key;
+    StringUTF8 value;
+} MapItem;
+
+typedef struct MapItems {
+    uint64_t n_vals;
+    MapItem* items;
+} MapItems;
+
 typedef struct FCSMetadata {
     enum FCSMode mode;
     enum Datatype datatype;
     enum ByteOrder byte_order;
     uint64_t n_parameters;
     Parameter* parameters;
-// TODO: extraKeyvals
+    MapItems extra_keyvals;
     OptionalInt64 n_events_aborted;
     OptionalString acquire_time;
     OptionalString acquire_end_time;

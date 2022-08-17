@@ -10,6 +10,7 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString as B
 import qualified Data.Text as T
 import qualified Data.Text.Encoding
+import qualified Data.Map.Strict as Map
 import qualified Data.Matrix as Matrix
 import qualified Data.Massiv.Array as A
 import Data.Binary.Get (runGet)
@@ -22,6 +23,8 @@ import Foreign.Storable
 import Foreign.Ptr
 import Foreign.Marshal.Alloc (malloc, free)
 import Foreign.Marshal.Array (newArray, mallocArray, copyArray)
+
+import Debug.Trace ( trace, traceM )
 
 import FCS
 
@@ -233,6 +236,25 @@ instance Storable (Maybe Trigger) where
             #{poke OptionalTrigger, trigger_channel} ptr $ triggerChannel t'
             #{poke OptionalTrigger, trigger_value} ptr $ triggerValue t'
 
+instance Storable (T.Text, T.Text) where
+    sizeOf _ = #{size MapItem}
+    alignment _ = #{alignment MapItem}
+    poke ptr kv = do
+        #{poke MapItem, key} ptr $ fst kv
+        #{poke MapItem, value} ptr $ snd kv
+
+instance Storable (Map.Map T.Text T.Text) where
+    sizeOf _ = #{size MapItems}
+    alignment _ = #{alignment MapItems}
+    poke ptr m
+        | n_vals == 0 = do
+            #{poke MapItems, n_vals} ptr $ n_vals
+        | otherwise = do
+            #{poke MapItems, n_vals} ptr $ n_vals
+            array <- newArray $ Map.toList m :: IO (Ptr (T.Text, T.Text))
+            #{poke MapItems, items} ptr $ array
+        where n_vals = Map.size m
+
 
 instance Storable FCSMetadata where
     sizeOf _ = #{size FCSMetadata}
@@ -244,7 +266,7 @@ instance Storable FCSMetadata where
         #{poke FCSMetadata, byte_order} ptr $ byteOrderToEnum $ byteOrder m
         #{poke FCSMetadata, n_parameters} ptr $ nParameters m
         #{poke FCSMetadata, parameters} ptr $ paramArray
-        -- TODO: extraKeyvals
+        #{poke FCSMetadata, extra_keyvals} ptr $ extraKeyvals m
         #{poke FCSMetadata, n_events_aborted} ptr $ nEventsAborted m
         #{poke FCSMetadata, acquire_time} ptr $ T.pack <$> iso8601Show <$> acquireTime m
         #{poke FCSMetadata, acquire_end_time} ptr $ T.pack <$> iso8601Show <$> acquireEndTime m
