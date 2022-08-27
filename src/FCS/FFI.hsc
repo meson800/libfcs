@@ -39,20 +39,6 @@ loadFCS fname = do
     return pFcs
 
 
-foreign export ccall freeFCS :: Ptr FCS -> IO Int
-freeFCS pFcs = do
-    -- Example of how to free all of the various pointers stuffed inside here
-    -- Free key float databuffers
-    uncompPtr <- #{peek FCSFile, uncompensated.data} pFcs :: IO (Ptr Word8)
-    free uncompPtr
-    compPtr <- #{peek FCSFile, compensated.data} pFcs :: IO (Ptr Word8)
-    free compPtr
-    -- TODO: free other optionals
-    -- TODO: free parameters
-    -- Free overall datastructure
-    free pFcs
-    return 0
-
 
 -----------Helper functions-----------------------------------
 fcsModeToEnum :: FCSMode -> Int64
@@ -91,7 +77,7 @@ instance Storable T.Text where
     alignment _ = #{alignment StringUTF8}
     poke ptr text = do
         let bytes = B.unpack $ Data.Text.Encoding.encodeUtf8 text
-        byteArray <- newArray bytes
+        byteArray <- newArray bytes :: IO (Ptr Word8)
         #{poke StringUTF8, length} ptr $ length bytes
         #{poke StringUTF8, buffer} ptr $ byteArray
 --    peek ptr = do return T.empty
@@ -236,12 +222,33 @@ instance Storable (Maybe Trigger) where
             #{poke OptionalTrigger, trigger_channel} ptr $ triggerChannel t'
             #{poke OptionalTrigger, trigger_value} ptr $ triggerValue t'
 
+instance Storable (Maybe CellSubset) where
+    sizeOf _ = #{size OptionalCellSubset}
+    alignment _ = #{alignment OptionalCellSubset}
+    poke ptr cs = case cs of
+        Nothing -> do
+            #{poke OptionalCellSubset, present} ptr $ False
+        Just cs' -> do
+            #{poke OptionalCellSubset, present} ptr $ True
+            #{poke OptionalCellSubset, n_simultaneous_subsets} ptr $ numSimultaneousSubsets cs'
+            #{poke OptionalCellSubset, n_subsets} ptr $ numSubsets cs'
+            #{poke OptionalCellSubset, subset_nbits} ptr $ subsetNBits cs'
+            #{poke OptionalCellSubset, flags} ptr $ flagMap cs'
+
+
 instance Storable (T.Text, T.Text) where
     sizeOf _ = #{size MapItem}
     alignment _ = #{alignment MapItem}
     poke ptr kv = do
         #{poke MapItem, key} ptr $ fst kv
         #{poke MapItem, value} ptr $ snd kv
+
+instance Storable (Int64, Int64) where
+    sizeOf _ = #{size IntMapItem}
+    alignment _ = #{alignment IntMapItem}
+    poke ptr kv = do
+        #{poke IntMapItem, key} ptr $ fst kv
+        #{poke IntMapItem, value} ptr $ snd kv
 
 instance Storable (Map.Map T.Text T.Text) where
     sizeOf _ = #{size MapItems}
@@ -255,6 +262,17 @@ instance Storable (Map.Map T.Text T.Text) where
             #{poke MapItems, items} ptr $ array
         where n_vals = Map.size m
 
+instance Storable (Map.Map Int64 Int64) where
+    sizeOf _ = #{size IntMapItems}
+    alignment _ = #{alignment IntMapItems}
+    poke ptr m
+        | n_vals == 0 = do
+            #{poke IntMapItems, n_vals} ptr $ n_vals
+        | otherwise = do
+            #{poke IntMapItems, n_vals} ptr $ n_vals
+            array <- newArray $ Map.toList m :: IO (Ptr (Int64, Int64))
+            #{poke IntMapItems, items} ptr $ array
+        where n_vals = Map.size m
 
 instance Storable FCSMetadata where
     sizeOf _ = #{size FCSMetadata}
@@ -271,6 +289,7 @@ instance Storable FCSMetadata where
         #{poke FCSMetadata, acquire_time} ptr $ T.pack <$> iso8601Show <$> acquireTime m
         #{poke FCSMetadata, acquire_end_time} ptr $ T.pack <$> iso8601Show <$> acquireEndTime m
         #{poke FCSMetadata, acquire_date} ptr $ T.pack <$> iso8601Show <$> acquireDate m
+        #{poke FCSMetadata, cell_subset} ptr $ cellSubset m
         #{poke FCSMetadata, cells} ptr $ cells m
         #{poke FCSMetadata, comment} ptr $ comment m
         #{poke FCSMetadata, cytometer_type} ptr $ cytometerType m
@@ -293,14 +312,39 @@ instance Storable FCSMetadata where
         #{poke FCSMetadata, timestep} ptr $ timestep m
         #{poke FCSMetadata, trigger} ptr $ trigger m
         #{poke FCSMetadata, well_id} ptr $ wellID m
-        -- TODO
 --  peek ptr
 
 instance Storable FCS where
     sizeOf _ = #{size FCSFile}
     alignment _ = #{alignment FCSFile}
     poke ptr f = do
-        #{poke FCSFile, name}          ptr $ T.pack "Test"
         #{poke FCSFile, metadata}      ptr $ metadata f
         #{poke FCSFile, uncompensated} ptr $ uncompensated $ dataSegment f
         #{poke FCSFile, compensated}   ptr $ compensated $ dataSegment f
+
+--- FREE CALLS ---
+freeString :: Ptr T.Text -> IO()
+freeString pStr = do
+    let buf = #{ptr StringUTF8, buffer} pStr :: Ptr Word8
+    free buf
+
+freeOptionalString :: Ptr (Maybe(T.Text)) -> IO()
+freeOptionalString pStr = do
+    present <- #{peek OptionalString, present} pStr :: IO (Bool)
+    if present then freeString $ #{ptr OptionalString, string} pStr else return ()
+
+
+foreign export ccall freeFCS :: Ptr FCS -> IO Int
+freeFCS pFcs = do
+    -- Example of how to free all of the various pointers stuffed inside here
+    -- Free key float databuffers
+    uncompPtr <- #{peek FCSFile, uncompensated.data} pFcs :: IO (Ptr Word8)
+    free uncompPtr
+    compPtr <- #{peek FCSFile, compensated.data} pFcs :: IO (Ptr Word8)
+    free compPtr
+    -- TODO: free other optionals
+    -- TODO: free parameters
+    -- Free overall datastructure
+    free pFcs
+    return 0
+

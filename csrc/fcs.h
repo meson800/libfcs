@@ -136,10 +136,28 @@ typedef struct  MapItem {
     StringUTF8 value;
 } MapItem;
 
+typedef struct IntMapItem {
+    int64_t key;
+    int64_t value;
+} IntMapItem;
+
 typedef struct MapItems {
     uint64_t n_vals;
     MapItem* items;
 } MapItems;
+
+typedef struct IntMapItems {
+    uint64_t n_vals;
+    IntMapItem* items;
+} IntMapItems;
+
+typedef struct OptionalCellSubset {
+    int64_t n_simultaneous_subsets;
+    OptionalInt64 n_subsets;
+    OptionalInt64 subset_nbits;
+    IntMapItems flags; 
+    bool present;
+} OptionalCellSubset;
 
 typedef struct FCSMetadata {
     enum FCSMode mode;
@@ -152,7 +170,7 @@ typedef struct FCSMetadata {
     OptionalString acquire_time;
     OptionalString acquire_end_time;
     OptionalString acquire_date;
-// TODO: optional CellSubset
+    OptionalCellSubset cell_subset;
     OptionalString cells;
     OptionalString comment;
     OptionalString cytometer_type;
@@ -179,7 +197,6 @@ typedef struct FCSMetadata {
 } FCSMetadata;
 
 typedef struct FCSFile {
-    StringUTF8 name;
     FCSMetadata metadata;
     DataBuffer uncompensated;
     DataBuffer compensated;

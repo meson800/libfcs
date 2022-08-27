@@ -17,6 +17,7 @@ module FCS
     , ParameterCalibration
     , Spillover
     , Trigger
+    , CellSubset
     , compensated
     , uncompensated
     , dataSegment
@@ -79,6 +80,11 @@ module FCS
     , triggerChannel
     , triggerValue
     , extraKeyvals
+    , numSimultaneousSubsets
+    , numSubsets
+    , subsetNBits
+    , flagMap
+    , cellSubset
     ) where
 
 import Control.Monad (replicateM, liftM2, liftM3)
