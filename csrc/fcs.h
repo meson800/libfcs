@@ -121,7 +121,7 @@ typedef struct Parameter {
 typedef struct OptionalSpillover {
     int64_t n_parameters;
     StringUTF8* parameters;
-    DataBuffer* matrix;
+    DataBuffer matrix;
     bool present;
 } OptionalSpillover;
 
@@ -208,6 +208,7 @@ extern "C" {
 
 LIBFCS_EXPORT bool libfcs_init();
 LIBFCS_EXPORT FCSFile* load_FCS(const char* filename);
+LIBFCS_EXPORT void free_FCS(FCSFile* fcs);
 LIBFCS_EXPORT void libfcs_exit();
 
 #if defined(__cplusplus)

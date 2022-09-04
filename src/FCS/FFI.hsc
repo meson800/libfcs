@@ -22,7 +22,7 @@ import Foreign.C.String
 import Foreign.Storable
 import Foreign.Ptr
 import Foreign.Marshal.Alloc (malloc, free)
-import Foreign.Marshal.Array (newArray, mallocArray, copyArray)
+import Foreign.Marshal.Array (newArray, mallocArray, copyArray, advancePtr)
 
 import Debug.Trace ( trace, traceM )
 
@@ -323,9 +323,10 @@ instance Storable FCS where
         #{poke FCSFile, compensated}   ptr $ compensated $ dataSegment f
 
 --- FREE CALLS ---
+
 freeString :: Ptr T.Text -> IO()
 freeString pStr = do
-    let buf = #{ptr StringUTF8, buffer} pStr :: Ptr Word8
+    buf <- #{peek StringUTF8, buffer} pStr :: IO (Ptr Word8)
     free buf
 
 freeOptionalString :: Ptr (Maybe(T.Text)) -> IO()
@@ -333,18 +334,112 @@ freeOptionalString pStr = do
     present <- #{peek OptionalString, present} pStr :: IO (Bool)
     if present then freeString $ #{ptr OptionalString, string} pStr else return ()
 
+freeOptionalInt64Array :: Ptr (Maybe [Int64]) -> IO()
+freeOptionalInt64Array pA = do
+    present <- #{peek OptionalInt64Array, present} pA :: IO (Bool)
+    if present then (#{peek OptionalInt64Array, vals} pA :: IO (Ptr Int64)) >>= free else return()
 
-foreign export ccall freeFCS :: Ptr FCS -> IO Int
+freeOptionalParamCalibration :: Ptr (Maybe (ParameterCalibration)) -> IO()
+freeOptionalParamCalibration pC = do
+    present <- #{peek OptionalParamCalibration, present} pC :: IO (Bool)
+    if present then freeString $ #{ptr OptionalParamCalibration, unit_name} pC else return ()
+
+freeParameter :: Ptr Parameter -> IO()
+freeParameter pP = do
+    freeString $ #{ptr Parameter, short_name} pP
+    freeOptionalString $ #{ptr Parameter, filter} pP
+    freeOptionalInt64Array $ #{ptr Parameter, excitation_wavelengths} pP
+    freeOptionalString $ #{ptr Parameter, name} pP
+    freeOptionalString $ #{ptr Parameter, detector_type} pP
+    freeOptionalParamCalibration $ #{ptr Parameter, calibration} pP
+
+-- freeOptionalSpillover
+freeOptionalSpillover :: Ptr (Maybe Spillover) -> IO()
+freeOptionalSpillover pS = do
+    present <- #{peek OptionalSpillover, present} pS :: IO (Bool)
+    if present then do
+        -- Free each of the individual strings
+        nStrings <- #{peek OptionalSpillover, n_parameters} pS :: IO (Int64)
+        strsPtr <- #{peek OptionalSpillover, parameters} pS :: IO (Ptr T.Text)
+        mapM_ freeString $ map (advancePtr strsPtr) [0..(fromIntegral $ nStrings - 1)]
+        -- Free the array itself
+        free strsPtr
+        -- Free the data buffer
+        bufPtr <- #{peek OptionalSpillover, matrix.data} pS :: IO (Ptr Word8)
+        free bufPtr
+    else return ()
+
+freeOptionalTrigger :: Ptr (Maybe (Trigger)) -> IO()
+freeOptionalTrigger pT = do
+    present <- #{peek OptionalTrigger, present} pT :: IO (Bool)
+    if present then freeString $ #{ptr OptionalTrigger, trigger_channel} pT else return ()
+
+freeMapItems :: Ptr (Map.Map T.Text T.Text) -> IO()
+freeMapItems pM = do
+    nItems <- fromIntegral <$> (#{peek MapItems, n_vals} pM :: IO (Int64)) :: IO (Int)
+    itsPtr <- #{peek MapItems, items} pM :: IO (Ptr (T.Text, T.Text))
+    -- Free internal keys and values
+    mapM_ freeString $ map (#{ptr MapItem, key} . advancePtr itsPtr) [0..(nItems - 1)]
+    mapM_ freeString $ map (#{ptr MapItem, value} . advancePtr itsPtr) [0..(nItems - 1)]
+    -- Free the array itself
+    free itsPtr
+
+freeIntMapItems :: Ptr (Map.Map Int64 Int64) -> IO()
+freeIntMapItems pM = do
+    -- Free just the array itself (no pointers in map items)
+    itsPtr <- #{peek IntMapItems, items} pM :: IO (Ptr (Int64, Int64))
+    free itsPtr
+
+freeOptionalCellSubset :: Ptr (Maybe CellSubset) -> IO()
+freeOptionalCellSubset pCS = do
+    present <- #{peek OptionalCellSubset, present} pCS :: IO (Bool)
+    if present then freeIntMapItems $ #{ptr OptionalCellSubset, flags} pCS else return ()
+
+freeFCSMetadata :: Ptr FCSMetadata -> IO()
+freeFCSMetadata pM = do
+    nParams <- fromIntegral <$> (#{peek FCSMetadata, n_parameters} pM :: IO (Int64)) :: IO (Int)
+    psPtr <- #{peek FCSMetadata, parameters} $ pM :: IO (Ptr Parameter)
+    -- Free parameters
+    mapM_ freeParameter $ map (advancePtr psPtr) [0..(nParams - 1)]
+    -- Free array itself
+    free psPtr
+    -- Free all other pointer-containing fields
+    freeMapItems $ #{ptr FCSMetadata, extra_keyvals} pM
+    freeOptionalString $ #{ptr FCSMetadata, acquire_time} pM 
+    freeOptionalString $ #{ptr FCSMetadata, acquire_end_time} pM 
+    freeOptionalString $ #{ptr FCSMetadata, acquire_date} pM 
+    freeOptionalCellSubset $ #{ptr FCSMetadata, cell_subset} pM
+    freeOptionalString $ #{ptr FCSMetadata, cells} pM 
+    freeOptionalString $ #{ptr FCSMetadata, comment} pM 
+    freeOptionalString $ #{ptr FCSMetadata, cytometer_type} pM 
+    freeOptionalString $ #{ptr FCSMetadata, cytometer_serial_number} pM 
+    freeOptionalString $ #{ptr FCSMetadata, institution} pM 
+    freeOptionalString $ #{ptr FCSMetadata, experimenter} pM 
+    freeOptionalString $ #{ptr FCSMetadata, operator} pM 
+    freeOptionalString $ #{ptr FCSMetadata, filename} pM 
+    freeOptionalString $ #{ptr FCSMetadata, last_modified} pM 
+    freeOptionalString $ #{ptr FCSMetadata, last_modifier} pM 
+    freeOptionalString $ #{ptr FCSMetadata, plate_id} pM 
+    freeOptionalString $ #{ptr FCSMetadata, plate_name} pM 
+    freeOptionalString $ #{ptr FCSMetadata, project} pM 
+    freeOptionalString $ #{ptr FCSMetadata, specimen} pM 
+    freeOptionalSpillover $ #{ptr FCSMetadata, spillover} pM
+    freeOptionalString $ #{ptr FCSMetadata, specimen_source} pM 
+    freeOptionalString $ #{ptr FCSMetadata, computer} pM 
+    freeOptionalTrigger $ #{ptr FCSMetadata, trigger} pM
+    freeOptionalString $ #{ptr FCSMetadata, well_id} pM 
+
+foreign export ccall freeFCS :: Ptr FCS -> IO ()
 freeFCS pFcs = do
-    -- Example of how to free all of the various pointers stuffed inside here
-    -- Free key float databuffers
+    -- Free key databuffers
     uncompPtr <- #{peek FCSFile, uncompensated.data} pFcs :: IO (Ptr Word8)
     free uncompPtr
     compPtr <- #{peek FCSFile, compensated.data} pFcs :: IO (Ptr Word8)
     free compPtr
-    -- TODO: free other optionals
-    -- TODO: free parameters
+    -- Free metadata
+    let metaPtr = #{ptr FCSFile, metadata} pFcs :: Ptr FCSMetadata
+    free metaPtr
     -- Free overall datastructure
     free pFcs
-    return 0
+    return ()
 

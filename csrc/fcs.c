@@ -19,6 +19,11 @@ bool libfcs_init(void){
 FCSFile* load_FCS(const char* filename) {
   return loadFCS((HsPtr)filename);
 }
+
+void free_FCS(FCSFile* fcs) {
+  freeFCS((HsPtr)fcs);
+  return;
+}
 void libfcs_exit(void){
   hs_exit();
 }
