@@ -35,7 +35,7 @@ loadFCS fname = do
     hfname <- peekCString fname
     fcs <- head <$> readFCS hfname
     pFcs <- malloc
-    traceM $ "allocated " ++ show pFcs
+    -- traceM $ "allocated " ++ show pFcs
     poke pFcs fcs
     return pFcs
 
@@ -79,7 +79,7 @@ instance Storable T.Text where
     poke ptr text = do
         let bytes = B.unpack $ Data.Text.Encoding.encodeUtf8 text
         byteArray <- newArray bytes :: IO (Ptr Word8)
-        traceM $ "allocated " ++ show byteArray
+        -- traceM $ "allocated " ++ show byteArray
         #{poke StringUTF8, length} ptr $ length bytes
         #{poke StringUTF8, buffer} ptr $ byteArray
 --    peek ptr = do return T.empty
@@ -121,7 +121,7 @@ instance Storable (Matrix.Matrix Double) where
     alignment _ = #{alignment DataBuffer}
     poke ptr m = do
         byteArray <- newArray $ Matrix.toList m
-        traceM $ "allocated " ++ show byteArray
+        -- traceM $ "allocated " ++ show byteArray
         #{poke DataBuffer, n_rows}     ptr $ Matrix.nrows m
         #{poke DataBuffer, n_cols} ptr $ Matrix.ncols m
         #{poke DataBuffer, data}         ptr $ byteArray
@@ -137,7 +137,7 @@ instance Storable (A.Matrix A.S Double) where
         -- Ptr a -> Storable b -> IO()
         let n_elem = A.elemsCount m
         byteArray <- mallocArray n_elem :: IO (Ptr Double)
-        traceM $ "allocated " ++ show byteArray
+        -- traceM $ "allocated " ++ show byteArray
         unsafeWith (A.toStorableVector m) $ (\ptr -> copyArray byteArray ptr n_elem)
         #{poke DataBuffer, data} ptr $ byteArray
 --  peek ptr
@@ -169,7 +169,7 @@ instance Storable (Maybe [Int64]) where
             #{poke OptionalInt64Array, present} ptr $ False
         Just ints -> do
             intArray <- newArray $ ints
-            traceM $ "allocated " ++ show intArray
+            -- traceM $ "allocated " ++ show intArray
             #{poke OptionalInt64Array, present} ptr $ True
             #{poke OptionalInt64Array, vals}    ptr $ intArray
 
@@ -213,7 +213,7 @@ instance Storable (Maybe Spillover) where
             #{poke OptionalSpillover, present} ptr $ True
             #{poke OptionalSpillover, n_parameters} ptr $ nParams s'
             paramNameArray <- newArray $ parameterNames s'
-            traceM $ "allocated " ++ show paramNameArray
+            -- traceM $ "allocated " ++ show paramNameArray
             #{poke OptionalSpillover, parameters} ptr $ paramNameArray
             #{poke OptionalSpillover, matrix} ptr $ spilloverMatrix s'
 
@@ -265,7 +265,7 @@ instance Storable (Map.Map T.Text T.Text) where
         | otherwise = do
             #{poke MapItems, n_vals} ptr $ n_vals
             array <- newArray $ Map.toList m :: IO (Ptr (T.Text, T.Text))
-            traceM $ "allocated " ++ show array
+            -- traceM $ "allocated " ++ show array
             #{poke MapItems, items} ptr $ array
         where n_vals = Map.size m
 
@@ -278,7 +278,7 @@ instance Storable (Map.Map Int64 Int64) where
         | otherwise = do
             #{poke IntMapItems, n_vals} ptr $ n_vals
             array <- newArray $ Map.toList m :: IO (Ptr (Int64, Int64))
-            traceM $ "allocated " ++ show array
+            -- traceM $ "allocated " ++ show array
             #{poke IntMapItems, items} ptr $ array
         where n_vals = Map.size m
 
@@ -287,7 +287,7 @@ instance Storable FCSMetadata where
     alignment _ = #{alignment FCSMetadata}
     poke ptr m = do
         paramArray <- newArray $ parameters m
-        traceM $ "allocated " ++ show paramArray
+        -- traceM $ "allocated " ++ show paramArray
         #{poke FCSMetadata, mode} ptr $ fcsModeToEnum $ mode m
         #{poke FCSMetadata, datatype} ptr $ datatypeToEnum $ datatype m
         #{poke FCSMetadata, byte_order} ptr $ byteOrderToEnum $ byteOrder m
@@ -336,7 +336,7 @@ instance Storable FCS where
 freeString :: Ptr T.Text -> IO()
 freeString pStr = do
     buf <- #{peek StringUTF8, buffer} pStr :: IO (Ptr Word8)
-    traceM $ "about to dealloc " ++ show buf
+    -- traceM $ "about to dealloc " ++ show buf
     free buf
 
 freeOptionalString :: Ptr (Maybe(T.Text)) -> IO()
@@ -373,11 +373,11 @@ freeOptionalSpillover pS = do
         strsPtr <- #{peek OptionalSpillover, parameters} pS :: IO (Ptr T.Text)
         mapM_ freeString $ map (advancePtr strsPtr) [0..(fromIntegral $ nStrings - 1)]
         -- Free the array itself
-        traceM $ "about to dealloc " ++ show strsPtr
+        -- traceM $ "about to dealloc " ++ show strsPtr
         free strsPtr
         -- Free the data buffer
         bufPtr <- #{peek OptionalSpillover, matrix.data} pS :: IO (Ptr Word8)
-        traceM $ "about to dealloc " ++ show bufPtr
+        -- traceM $ "about to dealloc " ++ show bufPtr
         free bufPtr
     else return ()
 
@@ -394,14 +394,14 @@ freeMapItems pM = do
     mapM_ freeString $ map (#{ptr MapItem, key} . advancePtr itsPtr) [0..(nItems - 1)]
     mapM_ freeString $ map (#{ptr MapItem, value} . advancePtr itsPtr) [0..(nItems - 1)]
     -- Free the array itself
-    traceM $ "about to dealloc " ++ show itsPtr
+    -- traceM $ "about to dealloc " ++ show itsPtr
     free itsPtr
 
 freeIntMapItems :: Ptr (Map.Map Int64 Int64) -> IO()
 freeIntMapItems pM = do
     -- Free just the array itself (no pointers in map items)
     itsPtr <- #{peek IntMapItems, items} pM :: IO (Ptr (Int64, Int64))
-    traceM $ "about to dealloc " ++ show itsPtr
+    -- traceM $ "about to dealloc " ++ show itsPtr
     free itsPtr
 
 freeOptionalCellSubset :: Ptr (Maybe CellSubset) -> IO()
@@ -416,7 +416,7 @@ freeFCSMetadata pM = do
     -- Free parameters
     mapM_ freeParameter $ map (advancePtr psPtr) [0..(nParams - 1)]
     -- Free array itself
-    traceM $ "about to dealloc " ++ show psPtr
+    -- traceM $ "about to dealloc " ++ show psPtr
     free psPtr
     -- Free all other pointer-containing fields
     freeMapItems $ #{ptr FCSMetadata, extra_keyvals} pM
@@ -448,17 +448,17 @@ foreign export ccall freeFCS :: Ptr FCS -> IO ()
 freeFCS pFcs = do
     -- Free key databuffers
     uncompPtr <- #{peek FCSFile, uncompensated.data} pFcs :: IO (Ptr Word8)
-    traceM $ "about to dealloc " ++ show uncompPtr
+    -- traceM $ "about to dealloc " ++ show uncompPtr
     free uncompPtr
     compPtr <- #{peek FCSFile, compensated.data} pFcs :: IO (Ptr Word8)
-    traceM $ "about to dealloc " ++ show compPtr
+    -- traceM $ "about to dealloc " ++ show compPtr
     free compPtr
     -- Free metadata
     let metaPtr = #{ptr FCSFile, metadata} pFcs :: Ptr FCSMetadata
     freeFCSMetadata metaPtr
     -- Free overall datastructure
-    traceM $ "About to free the whole datastructure at " ++ show pFcs
+    -- traceM $ "About to free the whole datastructure at " ++ show pFcs
     free pFcs
-    traceM "Done freeing!"
+    -- traceM "Done freeing!"
     return ()
 
