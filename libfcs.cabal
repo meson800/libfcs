@@ -18,8 +18,8 @@ cabal-version:       >=1.10
 foreign-library libfcs
   type: native-shared
 
+  options:      standalone
   if os(Windows)
-    options:      standalone
     mod-def-file: libfcs.def
     extra-bundled-libraries: libfcs/libfcs.dll.a
   
