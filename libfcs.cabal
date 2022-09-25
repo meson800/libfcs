@@ -40,6 +40,8 @@ foreign-library libfcs
   install-includes: fcs.h
   ghc-options:      -fPIC
   cc-options:       -DLIBFCS_EXPORTS
+  if os(Linux)
+    extra-libraries: rt
   default-language: Haskell2010
 
 library
